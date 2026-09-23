@@ -27,10 +27,10 @@ public class Tuning {
     public static Procedure pinpointTuner() {
         return new PinpointTuner();
     }
-//    @Tuner
-//    public static Procedure tests() {
-//        return new Tests(hardwareMap -> new Mecanum(hardwareMap, Constants.driveTrainConfig), (hardwareMap -> new PinpointLocalizer(hardwareMap, Constants.localizerConfig)), () -> new Foresight(Constants.foresightConfig));
-//    }
+    @Tuner
+    public static Procedure tests() {
+        return new Tests(hardwareMap -> new Mecanum(hardwareMap, Constants.drivetrainConfig), (hardwareMap -> new PinpointLocalizer(hardwareMap, Constants.localizerConfig)), null);
+    }
 
 //    @Tuner
 //    public static Procedure foresightTuner() {
