@@ -1,0 +1,217 @@
+package org.firstinspires.ftc.teamcode.subsystems.drivetrain;
+
+import static com.pedropathing.ivy.commands.Commands.waitUntil;
+import static com.pedropathing.ivy.groups.Groups.sequential;
+
+import com.pedropathing.controllers.PIDController;
+import com.pedropathing.drivetrain.DrivePowers;
+import com.pedropathing.follower.Follower;
+import com.pedropathing.follower.ManualDrive;
+import com.pedropathing.ivy.Command;
+import com.pedropathing.ivy.pedro.PedroCommands;
+import com.pedropathing.math.Pose;
+import com.pedropathing.paths.Path;
+import com.pedropathing.utils.Angle;
+import com.qualcomm.robotcore.hardware.HardwareMap;
+
+import org.firstinspires.ftc.teamcode.RobotConstants;
+import org.firstinspires.ftc.teamcode.subsystems.drivetrain.pedro.Constants;
+
+/**
+ * The drivetrain and its localization (the Pinpoint). This class is the only one that touches
+ * the Pedro follower; everything else drives and reads the robot's pose through these methods,
+ * or gets Ivy commands from followPathCommand() / holdPoseCommand() that wrap the follower internally.
+ */
+public class Drivetrain {
+    private final Follower follower;
+
+    // Turns heading error into turn power for the TeleOp heading lock (no I term: the D term uses the measured rotation speed)
+    private final PIDController headingLockController =
+            new PIDController(RobotConstants.HEADING_LOCK_P, 0.0, RobotConstants.HEADING_LOCK_D);
+    // The heading (radians) the lock is holding, or null while unlocked (driver turning, or robot still settling)
+    private Double lockedHeadingRadians = null;
+
+    /**
+     * Creates the Pedro follower, which sets up the motors and the Pinpoint localizer.
+     *
+     * @param hardwareMap the hardware map from the running OpMode
+     */
+    public Drivetrain(HardwareMap hardwareMap) {
+        follower = Constants.create(hardwareMap);
+    }
+
+    /**
+     * Runs the follower. Must be called every loop, including while driving manually.
+     */
+    public void update() {
+        follower.update();
+    }
+
+    /**
+     * Drives with field-centric controls: "forward" is away from the driver no matter which way the robot faces.
+     * With the heading lock on (see RobotConstants), a turn input at or below HEADING_LOCK_TURN_THRESHOLD
+     * makes the robot hold its heading; a larger turn input releases the lock and turns the robot as asked.
+     *
+     * @param forward the requested forward power, from -1 to 1
+     * @param strafe  the requested sideways power, from -1 to 1
+     * @param turn    the requested turning power, from -1 to 1
+     */
+    public void driveFieldCentric(double forward, double strafe, double turn) {
+        // A path or hold (e.g. the auto-shoot routine) ran since the last manual drive and may have turned the
+        // robot, so the locked heading is stale; holding it would spin the robot back to where it was before
+        if (!follower.manual()) {
+            releaseHeadingLock();
+        }
+
+        boolean driverIsTurning = Math.abs(turn) > RobotConstants.HEADING_LOCK_TURN_THRESHOLD;
+        if (!RobotConstants.HEADING_LOCK_ENABLED || driverIsTurning) {
+            releaseHeadingLock();
+            follower.manual(ManualDrive.fieldCentric(
+                    forward,
+                    strafe,
+                    turn,
+                    follower.pose().heading() // the Pinpoint heading is what rotates the input into the field frame
+            ));
+            return;
+        }
+
+        // Turn stick released: translate with no turn input, then let the lock supply the turn power
+        DrivePowers translationOnlyPowers = ManualDrive.fieldCentric(forward, strafe, 0.0, follower.pose().heading());
+
+        if (lockedHeadingRadians == null) {
+            double rotationSpeedDegreesPerSecond = Math.abs(Math.toDegrees(follower.velocity().omega));
+            if (rotationSpeedDegreesPerSecond >= RobotConstants.HEADING_LOCK_SETTLE_DEGREES_PER_SECOND) {
+                // Still coasting from the last turn; let it slow down before picking the heading to hold
+                follower.manual(translationOnlyPowers);
+                return;
+            }
+            lockedHeadingRadians = follower.pose().heading();
+            headingLockController.reset(); // clear the integral and timing left over from the previous lock
+        }
+
+        // Replaces the turn power with PD feedback on the heading error, keeping forward and strafe as they are
+        follower.manual(ManualDrive.headingLock(follower, headingLockController, translationOnlyPowers, lockedHeadingRadians));
+    }
+
+    /**
+     * Tells whether the heading lock is currently holding a heading.
+     *
+     * @return true while the robot is holding a locked heading; false while the driver turns or the robot settles
+     */
+    public boolean isHeadingLocked() {
+        return lockedHeadingRadians != null;
+    }
+
+    /**
+     * Forgets the locked heading. The next driveFieldCentric() call with the turn stick released grabs a fresh one.
+     */
+    private void releaseHeadingLock() {
+        lockedHeadingRadians = null;
+    }
+
+    /**
+     * Starts following a path. The follower keeps following it as update() is called.
+     *
+     * @param path the path to follow
+     */
+    public void followPath(Path path) {
+        follower.follow(path);
+    }
+
+    /**
+     * Holds the robot at a pose, correcting for both position and heading.
+     *
+     * @param targetPose the pose to hold
+     */
+    public void holdPose(Pose targetPose) {
+        follower.hold(targetPose);
+    }
+
+    /**
+     * Builds a command that follows a path and finishes only once the robot has actually arrived.
+     * Ivy's own follow command finishes at follower.atParametricEnd(), which can be true before the
+     * robot has settled at the end pose, so this waits for the same arrival check as holdPoseCommand().
+     * The follower is not updated by the command; Robot.update() must still run every loop.
+     *
+     * @param path the path to follow
+     * @return a command that finishes when the follower is idle and the robot is at the path's end pose
+     */
+    public Command followPathCommand(Path path) {
+        return sequential(
+                PedroCommands.follow(follower, path).requiring(this),
+                waitUntil(() -> !isBusy() && isAtPose(path.endPose()))
+        );
+    }
+
+    /**
+     * Builds a command that drives the robot to a pose and finishes once it gets there. The follower
+     * keeps holding the pose after the command finishes, until another drive command replaces it.
+     * Ivy's own hold command is an instant (it finishes the same loop it starts), so without the
+     * wait below a sequence would move on before the robot has turned or moved at all.
+     *
+     * @param targetPose the pose to drive to and hold
+     * @return a command that finishes when the follower is idle and the robot is at the target pose
+     */
+    public Command holdPoseCommand(Pose targetPose) {
+        return sequential(
+                PedroCommands.hold(follower, targetPose).requiring(this),
+                waitUntil(() -> !isBusy() && isAtPose(targetPose))
+        );
+    }
+
+    /**
+     * Tells whether the robot is close enough to a pose, in both position and heading, using the
+     * drive tolerances in RobotConstants. Checking position alone is what let an earlier autonomous
+     * start its next leg before a turn was done, so drive commands finish on this instead.
+     *
+     * @param targetPose the pose the robot should be at
+     * @return true if the robot is within the position and heading tolerances of the target
+     */
+    public boolean isAtPose(Pose targetPose) {
+        Pose currentPose = follower.pose();
+        double positionErrorInches = currentPose.distance(targetPose);
+        // Angle.error wraps the difference into [-180, 180) deg (as radians), so 359 deg vs 1 deg reads as 2 deg
+        double headingErrorDegrees = Math.toDegrees(Angle.error(currentPose.heading(), targetPose.heading()));
+        return positionErrorInches < RobotConstants.DRIVE_POSITION_TOLERANCE_INCHES
+                && Math.abs(headingErrorDegrees) < RobotConstants.DRIVE_HEADING_TOLERANCE_DEGREES;
+    }
+
+    /**
+     * Tells whether the follower is still following a path.
+     *
+     * @return true while a path is being followed
+     */
+    public boolean isBusy() {
+        return follower.isBusy();
+    }
+
+    /**
+     * Gets the robot's pose from the localizer.
+     *
+     * @return the pose, with x and y in inches and heading in radians
+     */
+
+    public Pose getPose() {
+        return follower.pose();
+    }
+
+    /**
+     * Makes the robot's current facing the new 0 deg heading, leaving x and y alone. Field-centric
+     * driving treats 0 deg as "away from the driver", so call this with the robot facing that way.
+     * Needed because the Pinpoint keeps its heading between OpModes; it is only cleared on power-up.
+     */
+    public void resetHeading() {
+        follower.setHeading(0.0);
+        releaseHeadingLock(); // the old locked heading was measured in the old frame
+    }
+
+    /**
+     * Overrides where the drivetrain thinks the robot is, e.g. to set the starting pose of an autonomous.
+     *
+     * @param pose the pose to set, with x and y in inches and heading in radians
+     */
+    public void setPose(Pose pose) {
+        follower.setPose(pose);
+        releaseHeadingLock(); // the old locked heading was measured in the old frame
+    }
+}
