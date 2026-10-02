@@ -93,6 +93,14 @@ public final class RobotConstants {
     public static final double DRIVE_POSITION_TOLERANCE_INCHES = 1.0;
     public static final double DRIVE_HEADING_TOLERANCE_DEGREES = 3.0;
 
+    // Stall detection (every drive command: autonomous legs and the auto-shoot routine). If the robot hasn't moved
+    // more than DRIVE_STALL_MOVEMENT_INCHES or turned more than DRIVE_STALL_TURN_DEGREES for DRIVE_STALL_SECONDS
+    // while a command is driving it, it's assumed to be pushing into a wall: the drivetrain stops and the command
+    // counts as finished, as if the robot had reached its target.
+    public static final double DRIVE_STALL_SECONDS = 1.0;
+    public static final double DRIVE_STALL_MOVEMENT_INCHES = 0.5;
+    public static final double DRIVE_STALL_TURN_DEGREES = 2.0;
+
     // Heading lock (TeleOp). While the turn stick is at or below HEADING_LOCK_TURN_THRESHOLD, the robot holds
     // its heading instead of drifting; pushing the stick past it turns the lock off so the driver turns freely.
     // Set HEADING_LOCK_ENABLED to false to drive exactly as before the lock existed.
@@ -135,13 +143,15 @@ public final class RobotConstants {
     public static final double SHOOTER_MIN_TARGET_RPM = 0.0;
     public static final double SHOOTER_MAX_TARGET_RPM = 6000.0;
 
-    // While SHOOT_BUTTON is held, the indexer feeds balls whenever the shooter wheel is no more than this many
-    // RPM below the current target RPM, and stops again whenever the wheel drops further (or SHOOT_BUTTON is released).
-    public static final double INDEXER_RPM_BELOW_TARGET = 40.0;
-    // Once the wheel gets within INDEXER_RPM_BELOW_TARGET, it must stay there this long before the indexer starts,
-    // so it has time to finish spinning up. If the wheel drops out of range, the wait starts over the next time it's back.
-    public static final double INDEXER_FEED_DELAY_MILLISECONDS = 500.0;
+    // While SHOOT_BUTTON is held, the indexer feeds balls whenever the shooter wheel is within this many RPM of the
+    // current target RPM (above or below), and stops again whenever the wheel leaves that range (or SHOOT_BUTTON is released).
+    public static final double INDEXER_RPM_TOLERANCE = 50.0;
     public static final double INDEXER_SERVO_POWER = -0.5; // feeds balls into the shooter wheel (half speed)
+    // While the intake is running, the indexer runs backward at this fraction of its feeding speed,
+    // so balls coming in are kept off the shooter wheel.
+    public static final double INDEXER_INTAKE_REVERSE_SPEED_FRACTION = 0.25;
+    // Opposite direction from feeding, at INDEXER_INTAKE_REVERSE_SPEED_FRACTION of the feeding speed
+    public static final double INDEXER_INTAKE_REVERSE_SERVO_POWER = -INDEXER_SERVO_POWER * INDEXER_INTAKE_REVERSE_SPEED_FRACTION;
 
     // Velocity PIDF gains the motor controller uses to hold the shooter wheel at the target RPM (setVelocity()).
     // While SHOOTER_USE_CUSTOM_VELOCITY_PIDF is false, the controller keeps its default gains and these four
@@ -153,7 +163,7 @@ public final class RobotConstants {
     public static final boolean SHOOTER_USE_CUSTOM_VELOCITY_PIDF = true;
 
     public static final double SHOOTER_VELOCITY_F = 13.0;
-    public static final double SHOOTER_VELOCITY_P = 100.0;
+    public static final double SHOOTER_VELOCITY_P = 300.0;
     public static final double SHOOTER_VELOCITY_I = 0.00;
     public static final double SHOOTER_VELOCITY_D = 0.0;
 

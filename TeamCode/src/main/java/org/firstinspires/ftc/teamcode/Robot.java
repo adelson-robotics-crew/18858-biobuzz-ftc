@@ -84,6 +84,7 @@ public class Robot {
     private Pose autoShootShootingPose = null;
     private double autoShootWallClearanceYInches;
     private double autoShootDurationSeconds;
+    private double autoShootTargetRpm;
 
     // The drive-to-shooting-pose-and-shoot routine while it runs, or null before the first press.
     // Built fresh on each press, since its first leg starts from wherever the robot is at that moment.
@@ -106,6 +107,9 @@ public class Robot {
     public void update() {
         drivetrain.update();
         intake.update();
+        // The indexer belongs to the shooter, so the intake can't run it; instead, run it backward while intaking
+        // to keep incoming balls off the shooter wheel
+        shooter.setIndexerReverse(intake.isActive());
         shooter.update();
     }
 
@@ -203,11 +207,14 @@ public class Robot {
      * @param shootingPose           the pose to shoot from, with x and y in inches and heading in radians
      * @param wallClearanceYInches   the y the robot drives to first, so it moves along x away from the wall
      * @param shootDurationSeconds   how long to shoot once at the shooting pose
+     * @param shootingTargetRpm      the shooter target RPM the routine sets before shooting; it stays the target afterward
      */
-    public void configureAutoShoot(Pose shootingPose, double wallClearanceYInches, double shootDurationSeconds) {
+    public void configureAutoShoot(Pose shootingPose, double wallClearanceYInches, double shootDurationSeconds,
+                                   double shootingTargetRpm) {
         autoShootShootingPose = shootingPose;
         autoShootWallClearanceYInches = wallClearanceYInches;
         autoShootDurationSeconds = shootDurationSeconds;
+        autoShootTargetRpm = shootingTargetRpm;
     }
 
     /**
@@ -245,7 +252,8 @@ public class Robot {
 
     /**
      * Builds the auto-shoot routine: drive to the wall clearance y, then to the shooting pose's x, turn in
-     * place to the shooting heading, then drive to the shooting pose's y, then shoot for the configured duration.
+     * place to the shooting heading, then drive to the shooting pose's y, then set the configured target RPM and
+     * shoot for the configured duration.
      * Moving along x and turning only at the clearance y keeps the robot from catching the wall on the way over.
      * The first two drive legs keep the robot's heading from routine start; the last one keeps the shooting heading.
      * Every drive leg finishes only once the robot has arrived (see Drivetrain.isAtPose()).
@@ -266,6 +274,7 @@ public class Robot {
                 driveStraightCommand(wallClearancePose, shootingXAtClearancePose),
                 drivetrain.holdPoseCommand(shootingXAtClearanceTurnedPose), // turn in place to the shooting heading
                 driveStraightCommand(shootingXAtClearanceTurnedPose, shootingPose),
+                instant(() -> shooter.setTargetRpm(autoShootTargetRpm)),
                 // Same as holding SHOOT_BUTTON: spins the wheel, and the indexer feeds once it's up to speed
                 instant(shooter::requestShooting),
                 waitMs(autoShootDurationSeconds * 1000.0),

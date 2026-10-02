@@ -5,7 +5,6 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
-import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.teamcode.RobotConstants;
 
@@ -14,11 +13,12 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
  * that feeds balls into it. Only Robot decides when the shooter may run (see Robot.requestShoot()).
  * While shooting, the wheel is held at a fixed RPM with closed-loop velocity control, so its speed
  * doesn't drop as the battery drains. The indexer is not requested separately: it feeds automatically
- * while the wheel is being driven (SHOOTING) and the wheel has stayed within RobotConstants.INDEXER_RPM_BELOW_TARGET of the
- * target RPM for RobotConstants.INDEXER_FEED_DELAY_MILLISECONDS, so a ball is never fed into a wheel that is still
- * spinning up or is coasting down.
- * The target RPM starts at RobotConstants.SHOOTER_TARGET_RPM and can be adjusted at runtime with adjustTargetRpm(),
- * so the right shooting speed can be found on the field.
+ * while the wheel is being driven (SHOOTING) and the wheel is within RobotConstants.INDEXER_RPM_TOLERANCE of the
+ * target RPM, so a ball is never fed into a wheel that is too slow (still spinning up, coasting down) or too fast
+ * (overshooting after a spin-up or a target change). Robot can also have the indexer run backward with
+ * setIndexerReverse() (it does this while the intake runs), which applies whenever the indexer isn't feeding.
+ * The target RPM starts at RobotConstants.SHOOTER_TARGET_RPM and can be adjusted at runtime with adjustTargetRpm()
+ * (so the right shooting speed can be found on the field) or set outright with setTargetRpm().
  */
 public class Shooter {
     public enum State {
@@ -31,8 +31,7 @@ public class Shooter {
     private State state = State.IDLE; // flywheel state
     private double peakShooterRpm = 0.0; // highest RPM magnitude seen since init, for finding the motor's max speed
     private double targetRpm = RobotConstants.SHOOTER_TARGET_RPM; // wheel speed held while shooting; adjustable at runtime
-    private final ElapsedTime inRangeTimer = new ElapsedTime(); // time since the wheel last came within feeding range
-    private boolean wheelWasInRange = false; // whether the wheel was within feeding range last loop
+    private boolean indexerReverseRequested = false; // whether Robot wants the indexer running backward (set every loop)
     /**
      * Gets the shooter hardware from the hardware map.
      *
@@ -68,18 +67,16 @@ public class Shooter {
                 break;
         }
 
-        // The wheel is "in range" while it's being driven (not coasting) and is fast enough
+        // The wheel is "in range" while it's being driven (not coasting) and is within the tolerance of the target,
+        // whether above or below it
         boolean wheelInRange = state == State.SHOOTING
-                && getShooterRpm() > targetRpm - RobotConstants.INDEXER_RPM_BELOW_TARGET;
-        // Restart the wait on the loop the wheel comes into range, so the delay is counted from that moment
-        if (wheelInRange && !wheelWasInRange) {
-            inRangeTimer.reset();
-        }
-        wheelWasInRange = wheelInRange;
+                && Math.abs(getShooterRpm() - targetRpm) <= RobotConstants.INDEXER_RPM_TOLERANCE;
 
-        // Feed only once the wheel has stayed in range for the full delay; stop as soon as it leaves the range
-        if (wheelInRange && inRangeTimer.milliseconds() >= RobotConstants.INDEXER_FEED_DELAY_MILLISECONDS) {
+        // Feed while the wheel is in range; otherwise run backward if Robot asked for it, or stop
+        if (wheelInRange) {
             indexerServo.setPower(RobotConstants.INDEXER_SERVO_POWER);
+        } else if (indexerReverseRequested) {
+            indexerServo.setPower(RobotConstants.INDEXER_INTAKE_REVERSE_SERVO_POWER);
         } else {
             indexerServo.setPower(0.0);
         }
@@ -113,6 +110,28 @@ public class Shooter {
     public void adjustTargetRpm(double rpmChange) {
         targetRpm = Math.max(RobotConstants.SHOOTER_MIN_TARGET_RPM,
                 Math.min(RobotConstants.SHOOTER_MAX_TARGET_RPM, targetRpm + rpmChange));
+    }
+
+    /**
+     * Sets the target RPM outright, kept between RobotConstants.SHOOTER_MIN_TARGET_RPM and
+     * RobotConstants.SHOOTER_MAX_TARGET_RPM. Takes effect on the next update(), even mid-shot.
+     *
+     * @param newTargetRpm the wheel speed to hold while shooting
+     */
+    public void setTargetRpm(double newTargetRpm) {
+        targetRpm = Math.max(RobotConstants.SHOOTER_MIN_TARGET_RPM,
+                Math.min(RobotConstants.SHOOTER_MAX_TARGET_RPM, newTargetRpm));
+    }
+
+    /**
+     * Sets whether the indexer should run backward at RobotConstants.INDEXER_INTAKE_REVERSE_SERVO_POWER.
+     * Feeding still takes priority, so this only matters while the indexer isn't feeding.
+     * Robot sets this every loop from whether the intake is running.
+     *
+     * @param reverseRequested true to run the indexer backward; false to leave it stopped when not feeding
+     */
+    public void setIndexerReverse(boolean reverseRequested) {
+        indexerReverseRequested = reverseRequested;
     }
 
     /**

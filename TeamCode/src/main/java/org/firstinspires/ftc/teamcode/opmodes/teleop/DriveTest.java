@@ -24,6 +24,7 @@ public class DriveTest extends OpMode {
     // Far enough off the wall that the robot doesn't catch it while driving along x
     private static final double AUTO_SHOOT_WALL_CLEARANCE_Y_INCHES = 21.0;
     private static final double AUTO_SHOOT_DURATION_SECONDS = 8.0;
+    private static final double AUTO_SHOOT_TARGET_RPM = 2400.0;
 
     private Robot robot;
 
@@ -40,7 +41,8 @@ public class DriveTest extends OpMode {
         robot.configureAutoShoot(
                 new Pose(SHOOTING_POSE_X_INCHES, SHOOTING_POSE_Y_INCHES, Math.toRadians(SHOOTING_POSE_HEADING_DEGREES)),
                 AUTO_SHOOT_WALL_CLEARANCE_Y_INCHES,
-                AUTO_SHOOT_DURATION_SECONDS
+                AUTO_SHOOT_DURATION_SECONDS,
+                AUTO_SHOOT_TARGET_RPM
         );
         // The Pinpoint keeps its pose from the previous OpMode; without this, a robot that ended an autonomous
         // facing 180 deg would drive with forward/back and left/right reversed, and the shooting pose would be off

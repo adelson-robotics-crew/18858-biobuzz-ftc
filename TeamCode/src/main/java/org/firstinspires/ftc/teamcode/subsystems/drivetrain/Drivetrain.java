@@ -1,5 +1,6 @@
 package org.firstinspires.ftc.teamcode.subsystems.drivetrain;
 
+import static com.pedropathing.ivy.commands.Commands.instant;
 import static com.pedropathing.ivy.commands.Commands.waitUntil;
 import static com.pedropathing.ivy.groups.Groups.sequential;
 
@@ -13,6 +14,7 @@ import com.pedropathing.math.Pose;
 import com.pedropathing.paths.Path;
 import com.pedropathing.utils.Angle;
 import com.qualcomm.robotcore.hardware.HardwareMap;
+import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.teamcode.RobotConstants;
 import org.firstinspires.ftc.teamcode.subsystems.drivetrain.pedro.Constants;
@@ -21,6 +23,7 @@ import org.firstinspires.ftc.teamcode.subsystems.drivetrain.pedro.Constants;
  * The drivetrain and its localization (the Pinpoint). This class is the only one that touches
  * the Pedro follower; everything else drives and reads the robot's pose through these methods,
  * or gets Ivy commands from followPathCommand() / holdPoseCommand() that wrap the follower internally.
+ * Those commands also stop the drivetrain and finish if the robot stalls (e.g. drives into a wall), see StallDetector.
  */
 public class Drivetrain {
     private final Follower follower;
@@ -132,14 +135,15 @@ public class Drivetrain {
      * Ivy's own follow command finishes at follower.atParametricEnd(), which can be true before the
      * robot has settled at the end pose, so this waits for the same arrival check as holdPoseCommand().
      * The follower is not updated by the command; Robot.update() must still run every loop.
+     * If the robot stalls on the way (see StallDetector), the drivetrain stops and the command finishes early.
      *
      * @param path the path to follow
-     * @return a command that finishes when the follower is idle and the robot is at the path's end pose
+     * @return a command that finishes when the follower is idle and the robot is at the path's end pose, or it stalls
      */
     public Command followPathCommand(Path path) {
         return sequential(
                 PedroCommands.follow(follower, path).requiring(this),
-                waitUntil(() -> !isBusy() && isAtPose(path.endPose()))
+                waitUntilArrivedOrStalled(path.endPose())
         );
     }
 
@@ -148,14 +152,42 @@ public class Drivetrain {
      * keeps holding the pose after the command finishes, until another drive command replaces it.
      * Ivy's own hold command is an instant (it finishes the same loop it starts), so without the
      * wait below a sequence would move on before the robot has turned or moved at all.
+     * If the robot stalls on the way (see StallDetector), the drivetrain stops (it no longer holds the pose)
+     * and the command finishes early.
      *
      * @param targetPose the pose to drive to and hold
-     * @return a command that finishes when the follower is idle and the robot is at the target pose
+     * @return a command that finishes when the follower is idle and the robot is at the target pose, or it stalls
      */
     public Command holdPoseCommand(Pose targetPose) {
         return sequential(
                 PedroCommands.hold(follower, targetPose).requiring(this),
-                waitUntil(() -> !isBusy() && isAtPose(targetPose))
+                waitUntilArrivedOrStalled(targetPose)
+        );
+    }
+
+    /**
+     * Builds the waiting half of a drive command: finishes once the robot arrives at the target pose, or once
+     * it has stalled, in which case the drivetrain is stopped first so it doesn't keep pushing into whatever
+     * is blocking it. A stall counts as arriving, so a sequence moves on to its next step either way.
+     *
+     * @param targetPose the pose the drive command is heading for
+     * @return a command that finishes on arrival or on a stall
+     */
+    private Command waitUntilArrivedOrStalled(Pose targetPose) {
+        StallDetector stallDetector = new StallDetector(); // one per command, so each drive gets its own clock
+        return sequential(
+                // Start the stall clock when the wait starts (not when the command was built), from where the robot is then
+                instant(() -> stallDetector.reset(follower.pose())),
+                waitUntil(() -> {
+                    if (!isBusy() && isAtPose(targetPose)) {
+                        return true;
+                    }
+                    if (stallDetector.isStalled(follower.pose())) {
+                        follower.stop(); // idle mode: follower.update() turns the drive motors off
+                        return true;
+                    }
+                    return false;
+                })
         );
     }
 
@@ -193,6 +225,49 @@ public class Drivetrain {
 
     public Pose getPose() {
         return follower.pose();
+    }
+
+    /**
+     * Detects a stalled robot: one that's being driven but hasn't moved or turned more than the
+     * RobotConstants.DRIVE_STALL_* thresholds for RobotConstants.DRIVE_STALL_SECONDS. Movement is measured
+     * from a reference pose, which moves up to the robot's pose (restarting the clock) whenever the robot gets
+     * past either threshold, so slow but steady progress never counts as a stall.
+     */
+    private static class StallDetector {
+        private Pose referencePose = null; // where the robot was when the clock last restarted
+        private final ElapsedTime timeSinceLastMovement = new ElapsedTime();
+
+        /**
+         * Restarts the clock from the given pose. Call when the drive starts.
+         *
+         * @param currentPose the robot's pose now
+         */
+        void reset(Pose currentPose) {
+            referencePose = currentPose;
+            timeSinceLastMovement.reset();
+        }
+
+        /**
+         * Checks for a stall. Call once per loop while driving.
+         *
+         * @param currentPose the robot's pose now
+         * @return true once the robot has gone RobotConstants.DRIVE_STALL_SECONDS without moving or turning past the thresholds
+         */
+        boolean isStalled(Pose currentPose) {
+            if (referencePose == null) {
+                reset(currentPose);
+                return false;
+            }
+            double movedInches = currentPose.distance(referencePose);
+            // Angle.error wraps the difference so turning across 0/360 deg reads as a small turn
+            double turnedDegrees = Math.abs(Math.toDegrees(Angle.error(currentPose.heading(), referencePose.heading())));
+            if (movedInches > RobotConstants.DRIVE_STALL_MOVEMENT_INCHES
+                    || turnedDegrees > RobotConstants.DRIVE_STALL_TURN_DEGREES) {
+                reset(currentPose); // still making progress
+                return false;
+            }
+            return timeSinceLastMovement.seconds() > RobotConstants.DRIVE_STALL_SECONDS;
+        }
     }
 
     /**
