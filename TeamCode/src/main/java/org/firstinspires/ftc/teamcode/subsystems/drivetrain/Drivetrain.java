@@ -60,7 +60,7 @@ public class Drivetrain {
      * @param turn    the requested turning power, from -1 to 1
      */
     public void driveFieldCentric(double forward, double strafe, double turn) {
-        // A path or hold (e.g. the auto-shoot routine) ran since the last manual drive and may have turned the
+        // A path or hold (e.g. an autonomous) ran since the last manual drive and may have turned the
         // robot, so the locked heading is stale; holding it would spin the robot back to where it was before
         if (!follower.manual()) {
             releaseHeadingLock();
@@ -94,6 +94,35 @@ public class Drivetrain {
 
         // Replaces the turn power with PD feedback on the heading error, keeping forward and strafe as they are
         follower.manual(ManualDrive.headingLock(follower, headingLockController, translationOnlyPowers, lockedHeadingRadians));
+    }
+
+    /**
+     * Drives with field-centric translation from the driver while the robot turns itself to a target heading
+     * (e.g. to aim the shooter). Unlike holdPose(), this doesn't lock position: the driver keeps full control of
+     * forward and strafe. Turn power is RobotConstants.HEADING_KP times the wrapped heading error, clamped to [-1, 1].
+     *
+     * @param forward              the requested forward power, from -1 to 1
+     * @param strafe               the requested sideways power, from -1 to 1
+     * @param targetHeadingRadians the heading to turn to and hold
+     */
+    public void driveFieldCentricWithHeading(double forward, double strafe, double targetHeadingRadians) {
+        // The heading lock isn't used here, and its old heading would be stale once this turns the robot
+        releaseHeadingLock();
+        double currentHeadingRadians = follower.pose().heading();
+        // Angle.error is (target - current) wrapped into [-PI, PI), the same sign Pedro's own heading lock uses
+        double turnPower = RobotConstants.HEADING_KP * Angle.error(currentHeadingRadians, targetHeadingRadians);
+        turnPower = Math.max(-1.0, Math.min(1.0, turnPower));
+        follower.manual(ManualDrive.fieldCentric(forward, strafe, turnPower, currentHeadingRadians));
+    }
+
+    /**
+     * How far the robot's heading is from a target heading, wrapped so it never reads more than 180 deg.
+     *
+     * @param targetHeadingRadians the heading to compare against
+     * @return target minus current heading, in degrees, in [-180, 180)
+     */
+    public double headingErrorDeg(double targetHeadingRadians) {
+        return Math.toDegrees(Angle.error(follower.pose().heading(), targetHeadingRadians));
     }
 
     /**

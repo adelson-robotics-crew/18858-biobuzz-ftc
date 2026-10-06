@@ -1,16 +1,11 @@
 package org.firstinspires.ftc.teamcode;
 
-import static com.pedropathing.api.Paths.line;
-import static com.pedropathing.ivy.commands.Commands.instant;
-import static com.pedropathing.ivy.commands.Commands.waitMs;
-import static com.pedropathing.ivy.groups.Groups.sequential;
-
-import com.pedropathing.ivy.Command;
-import com.pedropathing.ivy.Scheduler;
 import com.pedropathing.math.Pose;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
+import org.firstinspires.ftc.teamcode.aiming.ShotSolution;
+import org.firstinspires.ftc.teamcode.aiming.ShotSolver;
 import org.firstinspires.ftc.teamcode.subsystems.Intake;
 import org.firstinspires.ftc.teamcode.subsystems.Shooter;
 import org.firstinspires.ftc.teamcode.subsystems.drivetrain.Drivetrain;
@@ -76,19 +71,10 @@ public class Robot {
     // Whether each shooter-RPM button was held last loop, so a hold counts as one press instead of one per loop
     private boolean shooterRpmUpWasPressed = false;
     private boolean shooterRpmDownWasPressed = false;
-    private boolean autoShootWasPressed = false;
     private boolean zeroPoseWasPressed = false;
 
-    // Where the auto-shoot routine drives to and how it gets there, set by the OpMode through configureAutoShoot().
-    // Null until then, and while null the auto-shoot button does nothing.
-    private Pose autoShootShootingPose = null;
-    private double autoShootWallClearanceYInches;
-    private double autoShootDurationSeconds;
-    private double autoShootTargetRpm;
-
-    // The drive-to-shooting-pose-and-shoot routine while it runs, or null before the first press.
-    // Built fresh on each press, since its first leg starts from wherever the robot is at that moment.
-    private Command autoShootRoutine = null;
+    // The shot worked out from the robot's pose this loop while AIM_SHOOT_BUTTON is held, or null while it isn't
+    private ShotSolution currentShotSolution = null;
 
     /**
      * Initializes all hardware by constructing each subsystem. Add new subsystems here.
@@ -115,34 +101,22 @@ public class Robot {
 
     /**
      * Reads the driver gamepad through the mapping in RobotConstants and sends the resulting
-     * commands to the subsystems. Call once per TeleOp loop, before Scheduler.execute() and update().
-     * While the auto-shoot routine runs, it owns the drivetrain, intake, and shooter, so the sticks and
-     * mechanism buttons are ignored; only the RPM bumpers and the auto-shoot (cancel) button still work.
+     * commands to the subsystems. Call once per TeleOp loop, before update().
+     * While AIM_SHOOT_BUTTON is held, the robot aims and shoots (see applyAimAndShoot()) instead of
+     * turning with the turn stick and shooting on SHOOT_BUTTON.
      *
      * @param driverGamepad the gamepad that drives the robot (gamepad1 in the OpMode)
      */
     public void applyDriverControls(Gamepad driverGamepad) {
-        // Start the auto-shoot routine on a press, or cancel it if it's already running
-        boolean autoShootPressed = RobotConstants.AUTO_SHOOT_BUTTON.test(driverGamepad);
-        if (autoShootPressed && !autoShootWasPressed) {
-            if (isAutoShooting()) {
-                cancelAutoShoot();
-            } else {
-                startAutoShoot();
-            }
-        }
-        autoShootWasPressed = autoShootPressed;
-
-        // Reset the localizer to the zero pose once per press. The auto-shoot routine's legs were planned
-        // from the old pose, so it's cancelled rather than left driving toward targets that no longer line up.
+        // Reset the localizer to the zero pose once per press
         boolean zeroPosePressed = RobotConstants.ZERO_POSE_BUTTON.test(driverGamepad);
         if (zeroPosePressed && !zeroPoseWasPressed) {
-            cancelAutoShoot();
             drivetrain.setPose(zeroPose());
         }
         zeroPoseWasPressed = zeroPosePressed;
 
-        // Bump the shooter target RPM once per press, only on the loop the button goes down
+        // Bump the shooter target RPM once per press, only on the loop the button goes down.
+        // While aiming, the shot table sets the target every loop, so a bump there is overwritten right away.
         boolean shooterRpmUpPressed = RobotConstants.SHOOTER_RPM_UP_BUTTON.test(driverGamepad);
         if (shooterRpmUpPressed && !shooterRpmUpWasPressed) {
             shooter.adjustTargetRpm(RobotConstants.SHOOTER_RPM_ADJUST_STEP);
@@ -155,29 +129,87 @@ public class Robot {
         }
         shooterRpmDownWasPressed = shooterRpmDownPressed;
 
-        // Manual driving would replace the routine's path, and the buttons would stop its shooting
-        if (isAutoShooting()) {
-            return;
-        }
+        double forward = applyDeadband(RobotConstants.DRIVE_FORWARD_AXIS.applyAsDouble(driverGamepad) * RobotConstants.DRIVE_FORWARD_AXIS_SIGN);
+        double strafe = applyDeadband(RobotConstants.DRIVE_STRAFE_AXIS.applyAsDouble(driverGamepad) * RobotConstants.DRIVE_STRAFE_AXIS_SIGN);
+        double turn = applyDeadband(RobotConstants.DRIVE_TURN_AXIS.applyAsDouble(driverGamepad) * RobotConstants.DRIVE_TURN_AXIS_SIGN);
 
-        drivetrain.driveFieldCentric(
-                applyDeadband(RobotConstants.DRIVE_FORWARD_AXIS.applyAsDouble(driverGamepad) * RobotConstants.DRIVE_FORWARD_AXIS_SIGN),
-                applyDeadband(RobotConstants.DRIVE_STRAFE_AXIS.applyAsDouble(driverGamepad) * RobotConstants.DRIVE_STRAFE_AXIS_SIGN),
-                applyDeadband(RobotConstants.DRIVE_TURN_AXIS.applyAsDouble(driverGamepad) * RobotConstants.DRIVE_TURN_AXIS_SIGN)
-        );
-
-        // Intake is checked first, so if both buttons go down in the same loop, intake wins
+        // Intake is checked first, so if intake and a shoot button go down in the same loop, intake wins
         if (RobotConstants.INTAKE_BUTTON.test(driverGamepad)) {
             requestIntake();
         } else {
             stopIntake();
         }
 
+        if (RobotConstants.AIM_SHOOT_BUTTON.test(driverGamepad)) {
+            applyAimAndShoot(forward, strafe);
+            return;
+        }
+
+        currentShotSolution = null;
+        drivetrain.driveFieldCentric(forward, strafe, turn);
+        shooter.setFeedAllowed(true); // manual shooting feeds whenever the wheel is at speed, as before
         if (RobotConstants.SHOOT_BUTTON.test(driverGamepad)) {
             requestShoot();
         } else {
             stopShoot();
         }
+    }
+
+    /**
+     * One loop of aim-and-shoot: solves the shot from the robot's pose, turns the robot to the shooting heading
+     * while the driver keeps translation, holds the shooter at the shot table's RPM for the current distance,
+     * and lets the indexer feed only while the position is valid and the robot is aimed. The wheel keeps spinning
+     * at the table RPM even while the position isn't valid, so it's already at speed once the robot lines up.
+     *
+     * @param forward the driver's forward power, from -1 to 1
+     * @param strafe  the driver's sideways power, from -1 to 1
+     */
+    private void applyAimAndShoot(double forward, double strafe) {
+        currentShotSolution = ShotSolver.solve(drivetrain.getPose());
+        drivetrain.driveFieldCentricWithHeading(forward, strafe, currentShotSolution.targetHeadingRadians);
+        shooter.setTargetRpm(currentShotSolution.targetRpm);
+        shooter.setFeedAllowed(currentShotSolution.inRange && isAimed());
+        requestShoot(); // still rejected while the intake runs
+    }
+
+    /**
+     * The shot worked out this loop while AIM_SHOOT_BUTTON is held.
+     *
+     * @return the current shot solution, or null while not aiming
+     */
+    public ShotSolution getShotSolution() {
+        return currentShotSolution;
+    }
+
+    /**
+     * How far the robot's heading is from the shooting heading.
+     *
+     * @return heading error in degrees (target minus current, wrapped to [-180, 180)), or 0 while not aiming
+     */
+    public double getAimHeadingErrorDeg() {
+        if (currentShotSolution == null) {
+            return 0.0;
+        }
+        return drivetrain.headingErrorDeg(currentShotSolution.targetHeadingRadians);
+    }
+
+    /**
+     * Tells whether the robot is facing the shooting heading, within RobotConstants.HEADING_TOLERANCE_DEG.
+     *
+     * @return true while aiming and within the heading tolerance
+     */
+    public boolean isAimed() {
+        return currentShotSolution != null
+                && Math.abs(getAimHeadingErrorDeg()) <= RobotConstants.HEADING_TOLERANCE_DEG;
+    }
+
+    /**
+     * Tells whether everything needed to feed a shot is true: valid position, aimed, and the wheel at speed.
+     *
+     * @return true while aiming with all three conditions met
+     */
+    public boolean isReadyToShoot() {
+        return currentShotSolution != null && currentShotSolution.inRange && isAimed() && shooter.isAtSpeed();
     }
 
     /**
@@ -198,104 +230,6 @@ public class Robot {
     public static Pose zeroPose() {
         return new Pose(RobotConstants.ZERO_POSE_X_INCHES, RobotConstants.ZERO_POSE_Y_INCHES,
                 Math.toRadians(RobotConstants.ZERO_POSE_HEADING_DEGREES));
-    }
-
-    /**
-     * Sets where the auto-shoot routine drives to and how. Call once from the OpMode's init() before the
-     * auto-shoot button is used; until then the button does nothing.
-     *
-     * @param shootingPose           the pose to shoot from, with x and y in inches and heading in radians
-     * @param wallClearanceYInches   the y the robot drives to first, so it moves along x away from the wall
-     * @param shootDurationSeconds   how long to shoot once at the shooting pose
-     * @param shootingTargetRpm      the shooter target RPM the routine sets before shooting; it stays the target afterward
-     */
-    public void configureAutoShoot(Pose shootingPose, double wallClearanceYInches, double shootDurationSeconds,
-                                   double shootingTargetRpm) {
-        autoShootShootingPose = shootingPose;
-        autoShootWallClearanceYInches = wallClearanceYInches;
-        autoShootDurationSeconds = shootDurationSeconds;
-        autoShootTargetRpm = shootingTargetRpm;
-    }
-
-    /**
-     * Stops the intake and schedules the auto-shoot routine, starting from the robot's current pose.
-     * Does nothing if configureAutoShoot() hasn't been called.
-     * The OpMode must call Scheduler.execute() every loop for it to run.
-     */
-    public void startAutoShoot() {
-        if (autoShootShootingPose == null) {
-            return;
-        }
-        stopIntake(); // the intake and shooter never run together, and the routine ends by shooting
-        autoShootRoutine = buildAutoShootRoutine(drivetrain.getPose());
-        Scheduler.schedule(autoShootRoutine);
-    }
-
-    /**
-     * Cancels the auto-shoot routine. The next applyDriverControls() call hands the drivetrain and
-     * shooter back to the sticks and buttons, which also stops the shooter unless SHOOT_BUTTON is held.
-     */
-    public void cancelAutoShoot() {
-        if (autoShootRoutine != null) {
-            Scheduler.cancel(autoShootRoutine);
-        }
-    }
-
-    /**
-     * Tells whether the auto-shoot routine is running.
-     *
-     * @return true from the press that starts it until it finishes shooting or is cancelled
-     */
-    public boolean isAutoShooting() {
-        return autoShootRoutine != null && Scheduler.isScheduled(autoShootRoutine);
-    }
-
-    /**
-     * Builds the auto-shoot routine: drive to the wall clearance y, then to the shooting pose's x, turn in
-     * place to the shooting heading, then drive to the shooting pose's y, then set the configured target RPM and
-     * shoot for the configured duration.
-     * Moving along x and turning only at the clearance y keeps the robot from catching the wall on the way over.
-     * The first two drive legs keep the robot's heading from routine start; the last one keeps the shooting heading.
-     * Every drive leg finishes only once the robot has arrived (see Drivetrain.isAtPose()).
-     *
-     * @param routineStartPose where the robot is when the routine starts
-     * @return the routine, ready to schedule
-     */
-    private Command buildAutoShootRoutine(Pose routineStartPose) {
-        Pose shootingPose = autoShootShootingPose;
-        Pose wallClearancePose = routineStartPose.withY(autoShootWallClearanceYInches);
-        // Shooting x, still at the clearance y and the routine's starting heading
-        Pose shootingXAtClearancePose = wallClearancePose.withX(shootingPose.x());
-        // Same spot, turned to the shooting heading
-        Pose shootingXAtClearanceTurnedPose = shootingXAtClearancePose.withHeading(shootingPose.heading());
-
-        return sequential(
-                driveStraightCommand(routineStartPose, wallClearancePose),
-                driveStraightCommand(wallClearancePose, shootingXAtClearancePose),
-                drivetrain.holdPoseCommand(shootingXAtClearanceTurnedPose), // turn in place to the shooting heading
-                driveStraightCommand(shootingXAtClearanceTurnedPose, shootingPose),
-                instant(() -> shooter.setTargetRpm(autoShootTargetRpm)),
-                // Same as holding SHOOT_BUTTON: spins the wheel, and the indexer feeds once it's up to speed
-                instant(shooter::requestShooting),
-                waitMs(autoShootDurationSeconds * 1000.0),
-                instant(shooter::requestIdle)
-        );
-    }
-
-    /**
-     * Builds a command that drives straight from one pose to another without turning. If the two poses
-     * are already within the drive tolerance (e.g. the robot is already at that x), it just holds the end
-     * pose instead, since a path with (almost) no length gives the follower no direction to drive in.
-     *
-     * @param legStartPose where the leg starts; must have the same heading as legEndPose
-     * @param legEndPose   where the leg ends
-     * @return a command that finishes once the robot is at legEndPose
-     */
-    private Command driveStraightCommand(Pose legStartPose, Pose legEndPose) {
-        if (legStartPose.distance(legEndPose) < RobotConstants.DRIVE_POSITION_TOLERANCE_INCHES) {
-            return drivetrain.holdPoseCommand(legEndPose);
-        }
-        return drivetrain.followPathCommand(line(legStartPose, legEndPose).linear(legStartPose, legEndPose));
     }
 
     /**

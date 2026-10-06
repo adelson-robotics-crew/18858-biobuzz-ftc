@@ -26,4 +26,5 @@ android {
 
 dependencies {
     implementation project(':FtcRobotController')
+    testImplementation 'junit:junit:4.13.2' // plain-JVM unit tests for pure-Java code (no hardware), e.g. the shot table
 }
