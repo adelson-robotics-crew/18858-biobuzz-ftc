@@ -58,11 +58,6 @@ public class DriveTest extends OpMode {
             telemetry.addData("Shot Actual RPM", "%.0f", robot.shooter.getShooterRpm());
         }
 
-        telemetry.addData("Shooter RPM", robot.shooter.getShooterRpm());
-        telemetry.addData("Shooter Target RPM", robot.shooter.getTargetRpm()); // adjusted live with the bumpers
-        telemetry.addData("Shooter At Speed", robot.shooter.isAtSpeed());
-        telemetry.addData("Shooter Peak RPM", robot.shooter.getPeakShooterRpm());
-        telemetry.addData("Shooter Encoder (ticks/s)", robot.shooter.getShooterTicksPerSecond());
         telemetry.update();
     }
 }
