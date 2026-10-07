@@ -150,7 +150,7 @@ public final class RobotConstants {
     // when the wheel sags a little as a ball goes through. The indexer feeds only while the wheel is at speed.
     public static final double INDEXER_START_FEED_RPM_TOLERANCE = 25.0;
     public static final double INDEXER_STOP_FEED_RPM_TOLERANCE = 50.0;
-    public static final double INDEXER_SERVO_POWER = -0.5; // feeds balls into the shooter wheel (half speed)
+    public static final double INDEXER_SERVO_POWER = -0.2; // feeds balls into the shooter wheel (half speed)
     // While the intake is running, the indexer runs backward at this fraction of its feeding speed,
     // so balls coming in are kept off the shooter wheel.
     public static final double INDEXER_INTAKE_REVERSE_SPEED_FRACTION = 0.25;
@@ -175,6 +175,15 @@ public final class RobotConstants {
     // The shooter is a goBILDA 5203 Yellow Jacket 6000 RPM (5203-2402-0001, 1:1, no gearbox), so the encoder's
     // 28 ticks per turn of the motor shaft are also 28 ticks per turn of the output shaft.
     public static final double SHOOTER_ENCODER_TICKS_PER_REV = 28.0;
+
+    // Match Auto shooting
+    // The auto shoots from a fixed spot outside the shot table's range, so it uses its own RPM instead of the table.
+    public static final double AUTO_SHOOTER_TARGET_RPM = 2425.0;
+    // How long the auto keeps shooting, counted from when the wheel first reaches speed (indexer feeding starts then).
+    public static final double AUTO_SHOOT_SECONDS = 4.0;
+    // If the wheel hasn't reached speed by this long after the shooter starts, the AUTO_SHOOT_SECONDS of shooting start anyway,
+    // so a wheel that never settles can't keep the robot from parking.
+    public static final double AUTO_SPIN_UP_TIMEOUT_SECONDS = 3.0;
 
     // Shot aiming (AIM_SHOOT_BUTTON)
     // Our field frame: the frame the robot's pose reports. (0, 0) is the bottom right corner, (124, 124) the top left,

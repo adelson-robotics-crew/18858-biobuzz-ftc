@@ -11,6 +11,7 @@ import com.pedropathing.follower.ManualDrive;
 import com.pedropathing.ivy.Command;
 import com.pedropathing.ivy.pedro.PedroCommands;
 import com.pedropathing.math.Pose;
+import com.pedropathing.math.Velocity;
 import com.pedropathing.paths.Path;
 import com.pedropathing.utils.Angle;
 import com.qualcomm.robotcore.hardware.HardwareMap;
@@ -244,6 +245,57 @@ public class Drivetrain {
      */
     public boolean isBusy() {
         return follower.isBusy();
+    }
+
+    /**
+     * The robot's measured velocity, for logging.
+     *
+     * @return field-frame velocity: vx and vy in inches per second, omega in radians per second
+     */
+    public Velocity getVelocity() {
+        return follower.velocity();
+    }
+
+    /**
+     * What the follower is doing (following a path, holding a pose, manual, idle), for logging.
+     *
+     * @return the follower mode's name
+     */
+    public String getFollowerModeName() {
+        return follower.mode().name();
+    }
+
+    /**
+     * How far along the current path the robot is, as Pedro measures it: the progress value t of the closest
+     * point on the path, 0 at the start and 1 at the end. Heading interpolation (e.g. linear) uses this t.
+     *
+     * @return the current path's parametric completion, from 0 to 1, or NaN while not following a path
+     */
+    public double getPathProgress() {
+        // Only meaningful (and only safe to ask for) while a path is being followed, not while holding or idle
+        return follower.following() ? follower.parametricCompletion() : Double.NaN;
+    }
+
+    /**
+     * The point on the current path closest to the robot, with the heading the path wants there.
+     * This is what the follower is steering toward each loop.
+     *
+     * @return the closest path pose, with x and y in inches and heading in radians, or null while not following a path
+     */
+    public Pose getClosestPathPose() {
+        // Only meaningful (and only safe to ask for) while a path is being followed, not while holding or idle
+        return follower.following() ? follower.closestPose() : null;
+    }
+
+    /**
+     * Pedro's full debug snapshot for this loop (follow state, localizer, drivetrain motor powers, and the
+     * path-following algorithm's internals), as text. Meant for logs, not for logic: the keys inside are Pedro's
+     * and can change between Pedro versions. Call after update() so it describes this loop.
+     *
+     * @return the snapshot as text
+     */
+    public String getFollowerDebugText() {
+        return follower.debug().toString();
     }
 
     /**
