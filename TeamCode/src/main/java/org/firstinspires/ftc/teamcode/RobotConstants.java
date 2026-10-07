@@ -52,13 +52,14 @@ public final class RobotConstants {
     public static final Predicate<Gamepad> SHOOTER_RPM_UP_BUTTON = gamepad -> gamepad.right_bumper;
     public static final Predicate<Gamepad> SHOOTER_RPM_DOWN_BUTTON = gamepad -> gamepad.left_bumper;
 
-    // Auto-shoot: one press drives to the shooting pose and shoots. The OpMode supplies the shooting pose and
-    // the rest of the routine's numbers through Robot.configureAutoShoot(); if it doesn't, the button does nothing.
-    // Pressing it again while the routine is running cancels it and hands control back to the driver.
-    public static final Predicate<Gamepad> AUTO_SHOOT_BUTTON = gamepad -> gamepad.x;
+    // Aim and shoot (hold): the robot turns to face the shooter at the target while the left stick still drives,
+    // the shooter spins at the shot table's RPM for the current distance, and the indexer feeds only while the
+    // position is valid (distance and angle), the heading is within HEADING_TOLERANCE_DEG, and the wheel is at speed.
+    // The turn stick is ignored while held. Release to go back to normal driving; the shooter stops.
+    public static final Predicate<Gamepad> AIM_SHOOT_BUTTON = gamepad -> gamepad.x;
 
     // Zero pose: with the robot in the bottom left corner, one press sets the localizer to the zero pose
-    // (see the Zero pose constants below). Also cancels the auto-shoot routine if it's running.
+    // (see the Zero pose constants below).
     public static final Predicate<Gamepad> ZERO_POSE_BUTTON = gamepad -> gamepad.b;
 
     // =====================================================================================
@@ -93,7 +94,7 @@ public final class RobotConstants {
     public static final double DRIVE_POSITION_TOLERANCE_INCHES = 1.0;
     public static final double DRIVE_HEADING_TOLERANCE_DEGREES = 3.0;
 
-    // Stall detection (every drive command: autonomous legs and the auto-shoot routine). If the robot hasn't moved
+    // Stall detection (every drive command, e.g. autonomous legs). If the robot hasn't moved
     // more than DRIVE_STALL_MOVEMENT_INCHES or turned more than DRIVE_STALL_TURN_DEGREES for DRIVE_STALL_SECONDS
     // while a command is driving it, it's assumed to be pushing into a wall: the drivetrain stops and the command
     // counts as finished, as if the robot had reached its target.
@@ -143,9 +144,12 @@ public final class RobotConstants {
     public static final double SHOOTER_MIN_TARGET_RPM = 0.0;
     public static final double SHOOTER_MAX_TARGET_RPM = 6000.0;
 
-    // While SHOOT_BUTTON is held, the indexer feeds balls whenever the shooter wheel is within this many RPM of the
-    // current target RPM (above or below), and stops again whenever the wheel leaves that range (or SHOOT_BUTTON is released).
-    public static final double INDEXER_RPM_TOLERANCE = 50.0;
+    // Indexer feed hysteresis. While shooting, the wheel counts as "at speed" once it gets within
+    // INDEXER_START_FEED_RPM_TOLERANCE of the target RPM (above or below), and keeps counting as at speed until it
+    // drifts more than INDEXER_STOP_FEED_RPM_TOLERANCE away. The gap keeps the indexer from flickering on and off
+    // when the wheel sags a little as a ball goes through. The indexer feeds only while the wheel is at speed.
+    public static final double INDEXER_START_FEED_RPM_TOLERANCE = 25.0;
+    public static final double INDEXER_STOP_FEED_RPM_TOLERANCE = 50.0;
     public static final double INDEXER_SERVO_POWER = -0.5; // feeds balls into the shooter wheel (half speed)
     // While the intake is running, the indexer runs backward at this fraction of its feeding speed,
     // so balls coming in are kept off the shooter wheel.
@@ -171,6 +175,36 @@ public final class RobotConstants {
     // The shooter is a goBILDA 5203 Yellow Jacket 6000 RPM (5203-2402-0001, 1:1, no gearbox), so the encoder's
     // 28 ticks per turn of the motor shaft are also 28 ticks per turn of the output shaft.
     public static final double SHOOTER_ENCODER_TICKS_PER_REV = 28.0;
+
+    // Shot aiming (AIM_SHOOT_BUTTON)
+    // Our field frame: the frame the robot's pose reports. (0, 0) is the bottom right corner, (124, 124) the top left,
+    // in inches. Heading 0 = +x, counterclockwise positive.
+
+    // The HIVE target point: the least-squares intersection of all measured shot headings.
+    public static final double SHOT_TARGET_X_INCHES = 72.95;
+    public static final double SHOT_TARGET_Y_INCHES = 47.56;
+
+    // Distance (inches from the target) -> shooter motor RPM, linearly interpolated between rows (see ShotTable).
+    // Distances must be ascending. The curve is deliberately U-shaped: close in, the shot needs more speed to
+    // clear the front lip of the CELL. RPMs are as read from shooter telemetry (SHOOTER_ENCODER_TICKS_PER_REV).
+    public static final double[] SHOT_TABLE_DISTANCES_INCHES = {42.0, 45.0, 48.0, 52.0, 62.4};
+    public static final double[] SHOT_TABLE_RPMS = {2475.0, 2400.0, 2440.0, 2460.0, 2525.0};
+
+    // A position is only valid to shoot from within this distance range (inclusive). The 42 in table row exists
+    // for interpolation, but 42 in is the edge of what works, so the range starts at 43.
+    public static final double SHOT_MIN_DISTANCE_INCHES = 43.0;
+    public static final double SHOT_MAX_DISTANCE_INCHES = 62.4;
+
+    // A position is also only valid within this many degrees either side of straight in front of the target
+    // (straight in front = directly -y from it).
+    public static final double MAX_ANGLE_OFF_CENTER_DEG = 45.0;
+
+    // The indexer only feeds once the robot's heading is within this many degrees of the shooting heading.
+    // Every measured scoring shot was within 5 deg of the computed heading.
+    public static final double HEADING_TOLERANCE_DEG = 3.0;
+
+    // Turn power per radian of heading error while aiming (P only), clamped to [-1, 1].
+    public static final double HEADING_KP = 1.0;
 
     /**
      * Not meant to be instantiated; this class only holds constants.

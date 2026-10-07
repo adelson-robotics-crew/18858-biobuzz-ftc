@@ -13,10 +13,13 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
  * that feeds balls into it. Only Robot decides when the shooter may run (see Robot.requestShoot()).
  * While shooting, the wheel is held at a fixed RPM with closed-loop velocity control, so its speed
  * doesn't drop as the battery drains. The indexer is not requested separately: it feeds automatically
- * while the wheel is being driven (SHOOTING) and the wheel is within RobotConstants.INDEXER_RPM_TOLERANCE of the
- * target RPM, so a ball is never fed into a wheel that is too slow (still spinning up, coasting down) or too fast
- * (overshooting after a spin-up or a target change). Robot can also have the indexer run backward with
- * setIndexerReverse() (it does this while the intake runs), which applies whenever the indexer isn't feeding.
+ * while the wheel is being driven (SHOOTING), the wheel is at speed, and Robot allows feeding (setFeedAllowed()).
+ * "At speed" has hysteresis: the wheel must get within RobotConstants.INDEXER_START_FEED_RPM_TOLERANCE of the
+ * target to count, and stops counting once it's more than RobotConstants.INDEXER_STOP_FEED_RPM_TOLERANCE away.
+ * So a ball is never fed into a wheel that is too slow (still spinning up, coasting down) or too fast
+ * (overshooting after a spin-up or a target change), and the indexer doesn't flicker when a ball briefly drags
+ * the wheel down. Robot can also have the indexer run backward with setIndexerReverse() (it does this while the
+ * intake runs), which applies whenever the indexer isn't feeding.
  * The target RPM starts at RobotConstants.SHOOTER_TARGET_RPM and can be adjusted at runtime with adjustTargetRpm()
  * (so the right shooting speed can be found on the field) or set outright with setTargetRpm().
  */
@@ -32,6 +35,8 @@ public class Shooter {
     private double peakShooterRpm = 0.0; // highest RPM magnitude seen since init, for finding the motor's max speed
     private double targetRpm = RobotConstants.SHOOTER_TARGET_RPM; // wheel speed held while shooting; adjustable at runtime
     private boolean indexerReverseRequested = false; // whether Robot wants the indexer running backward (set every loop)
+    private boolean feedAllowed = true; // whether Robot allows the indexer to feed (e.g. only once aimed); set every loop
+    private boolean wheelAtSpeed = false; // the hysteresis latch: true once within the start tolerance, until past the stop tolerance
     /**
      * Gets the shooter hardware from the hardware map.
      *
@@ -67,13 +72,19 @@ public class Shooter {
                 break;
         }
 
-        // The wheel is "in range" while it's being driven (not coasting) and is within the tolerance of the target,
-        // whether above or below it
-        boolean wheelInRange = state == State.SHOOTING
-                && Math.abs(getShooterRpm() - targetRpm) <= RobotConstants.INDEXER_RPM_TOLERANCE;
+        // The wheel is only ever at speed while it's being driven (not coasting). Otherwise it latches at speed once
+        // it's within the start tolerance of the target (above or below), and unlatches once past the stop tolerance
+        double rpmError = Math.abs(getShooterRpm() - targetRpm);
+        if (state != State.SHOOTING) {
+            wheelAtSpeed = false;
+        } else if (wheelAtSpeed) {
+            wheelAtSpeed = rpmError <= RobotConstants.INDEXER_STOP_FEED_RPM_TOLERANCE;
+        } else {
+            wheelAtSpeed = rpmError <= RobotConstants.INDEXER_START_FEED_RPM_TOLERANCE;
+        }
 
-        // Feed while the wheel is in range; otherwise run backward if Robot asked for it, or stop
-        if (wheelInRange) {
+        // Feed while the wheel is at speed and Robot allows it; otherwise run backward if Robot asked for it, or stop
+        if (wheelAtSpeed && feedAllowed) {
             indexerServo.setPower(RobotConstants.INDEXER_SERVO_POWER);
         } else if (indexerReverseRequested) {
             indexerServo.setPower(RobotConstants.INDEXER_INTAKE_REVERSE_SERVO_POWER);
@@ -132,6 +143,25 @@ public class Shooter {
      */
     public void setIndexerReverse(boolean reverseRequested) {
         indexerReverseRequested = reverseRequested;
+    }
+
+    /**
+     * Sets whether the indexer may feed. Even when allowed, it only feeds while shooting with the wheel at speed.
+     * Robot sets this every loop: while aiming, only once the robot is in a valid position and aimed; otherwise true.
+     *
+     * @param allowed true to let the indexer feed once the wheel is at speed; false to hold balls back
+     */
+    public void setFeedAllowed(boolean allowed) {
+        feedAllowed = allowed;
+    }
+
+    /**
+     * Tells whether the wheel is at speed (the hysteresis latch the indexer feeds on), as of the last update().
+     *
+     * @return true while shooting with the wheel within the feed tolerances of the target RPM
+     */
+    public boolean isAtSpeed() {
+        return wheelAtSpeed;
     }
 
     /**
