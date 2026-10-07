@@ -1,8 +1,10 @@
-package org.firstinspires.ftc.teamcode.aiming;
+package org.firstinspires.ftc.teamcode.tests.aiming;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolution;
+import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolver;
 import org.junit.Test;
 
 /**

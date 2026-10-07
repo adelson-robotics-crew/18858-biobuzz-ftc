@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.aiming;
+package org.firstinspires.ftc.teamcode.subsystems.aiming;
 
 import org.firstinspires.ftc.teamcode.RobotConstants;
 

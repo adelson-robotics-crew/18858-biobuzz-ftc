@@ -4,8 +4,8 @@ import com.pedropathing.math.Pose;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
-import org.firstinspires.ftc.teamcode.aiming.ShotSolution;
-import org.firstinspires.ftc.teamcode.aiming.ShotSolver;
+import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolution;
+import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolver;
 import org.firstinspires.ftc.teamcode.subsystems.Intake;
 import org.firstinspires.ftc.teamcode.subsystems.Shooter;
 import org.firstinspires.ftc.teamcode.subsystems.drivetrain.Drivetrain;

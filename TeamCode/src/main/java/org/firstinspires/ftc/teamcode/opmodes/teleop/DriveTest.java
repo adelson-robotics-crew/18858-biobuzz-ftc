@@ -5,7 +5,7 @@ import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import org.firstinspires.ftc.teamcode.Robot;
-import org.firstinspires.ftc.teamcode.aiming.ShotSolution;
+import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolution;
 
 /**
  * Field-centric TeleOp driven by Pedro Pathing. The robot's pose from the Pinpoint computer

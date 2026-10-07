@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.aiming;
+package org.firstinspires.ftc.teamcode.tests.aiming;
 
 /**
  * The raw shot measurements the shot table was built from (our field frame), shared by the tests.

@@ -1,10 +1,11 @@
-package org.firstinspires.ftc.teamcode.aiming;
+package org.firstinspires.ftc.teamcode.tests.aiming;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.firstinspires.ftc.teamcode.RobotConstants;
+import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotTable;
 import org.junit.Test;
 
 /**

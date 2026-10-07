@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.aiming;
+package org.firstinspires.ftc.teamcode.subsystems.aiming;
 
 /**
  * What ShotSolver worked out for one robot position: how far the target is, which way to face, how fast to
