@@ -66,4 +66,15 @@ public class DriveTest extends MatchTeleOp {
     protected boolean useCarriedPose() {
         return false;
     }
+
+    /**
+     * The practice frame starts at 0 deg facing away from the driver, so the sticks stay as they are even though
+     * this TeleOp aims at the blue hive.
+     *
+     * @return false
+     */
+    @Override
+    protected boolean driverSideFollowsAlliance() {
+        return false;
+    }
 }

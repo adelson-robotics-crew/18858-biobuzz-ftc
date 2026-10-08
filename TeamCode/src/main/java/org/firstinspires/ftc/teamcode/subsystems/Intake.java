@@ -13,7 +13,8 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
 public class Intake {
     public enum State {
         IDLE,
-        INTAKING
+        INTAKING,
+        OUTTAKING
     }
 
     private final CRServo rightServo;
@@ -48,6 +49,12 @@ public class Intake {
                 leftServo.setPower(RobotConstants.INTAKE_LEFT_SERVO_POWER);
                 intakeMotor.setPower(RobotConstants.INTAKE_MOTOR_POWER);
                 break;
+            case OUTTAKING:
+                // The intake powers negated: everything spins the opposite way, pushing balls back out
+                rightServo.setPower(-RobotConstants.INTAKE_RIGHT_SERVO_POWER);
+                leftServo.setPower(-RobotConstants.INTAKE_LEFT_SERVO_POWER);
+                intakeMotor.setPower(-RobotConstants.INTAKE_MOTOR_POWER);
+                break;
         }
     }
 
@@ -60,6 +67,14 @@ public class Intake {
     }
 
     /**
+     * Requests the outtaking state (the intake run backwards). Robot must check that this is allowed first;
+     * this method does not check the shooter.
+     */
+    public void requestOuttaking() {
+        state = State.OUTTAKING;
+    }
+
+    /**
      * Requests the idle (stopped) state.
      */
     public void requestIdle() {
@@ -69,10 +84,10 @@ public class Intake {
     /**
      * Tells whether the intake is running. Robot checks this before allowing the shooter to start.
      *
-     * @return true if the intake is in the INTAKING state
+     * @return true if the intake is running in either direction (INTAKING or OUTTAKING)
      */
     public boolean isActive() {
-        return state == State.INTAKING;
+        return state != State.IDLE;
     }
 
     /**

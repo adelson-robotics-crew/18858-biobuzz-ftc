@@ -46,6 +46,10 @@ public final class RobotConstants {
     // Triggers are analog (0 to 1), so a trigger counts as pressed once it's pulled past TRIGGER_PRESSED_THRESHOLD.
     public static final double TRIGGER_PRESSED_THRESHOLD = 0.5;
     public static final Predicate<Gamepad> INTAKE_BUTTON = gamepad -> gamepad.left_trigger > TRIGGER_PRESSED_THRESHOLD;
+    // Outtake: runs the intake servos and motor backwards to push balls out. If it's held with INTAKE_BUTTON,
+    // intake wins. Shares the left bumper with SHOOTER_RPM_DOWN_BUTTON, which only works while
+    // SHOOTER_RPM_ADJUST_ENABLED is on (off for matches).
+    public static final Predicate<Gamepad> OUTTAKE_BUTTON = gamepad -> gamepad.left_bumper;
     // Manual shot: spins the flywheel at the fixed SHOOTER_TARGET_RPM (not the shot table, so it still works if the
     // robot's position is off) and the indexer feeds automatically whenever the wheel is up to speed. The driver
     // drives to the usual spot and shoots from there.
@@ -66,8 +70,8 @@ public final class RobotConstants {
     public static final Predicate<Gamepad> AIM_LEFT_CELL_BUTTON = gamepad -> gamepad.x;
     public static final Predicate<Gamepad> AIM_RIGHT_CELL_BUTTON = gamepad -> gamepad.b;
 
-    // Emergency heading reset (one press): with the robot facing straight away from the driver (+x, the way the
-    // forward stick drives), sets the heading to 0 deg. In Match TeleOp x and y are left alone; it's only for when the
+    // Emergency heading reset (one press): with the robot facing straight away from the driver (the way the
+    // forward stick drives), sets the heading to 0 deg from the red side or 180 deg from the blue side. In Match TeleOp x and y are left alone; it's only for when the
     // heading has drifted or the robot got spun. In DriveTest it resets the whole pose to (0, 0, 0 deg), so put the
     // robot back in the practice corner, facing away from the driver, before pressing it.
     // "back" is the small button on the left side above the mode button (labeled Share on PlayStation controllers).

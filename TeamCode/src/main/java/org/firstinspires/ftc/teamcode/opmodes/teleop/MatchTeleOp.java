@@ -9,6 +9,7 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
 import org.firstinspires.ftc.teamcode.logging.CsvLog;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.Alliance;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolution;
+import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotTarget;
 import org.firstinspires.ftc.teamcode.subsystems.drivetrain.Drivetrain;
 
 /**
@@ -85,6 +86,17 @@ public abstract class MatchTeleOp extends OpMode {
     }
 
     /**
+     * Whether the driver stands on their alliance's side of the field, so a blue TeleOp drives from the blue
+     * driver's side (sticks turned 180 deg from the red side). A practice TeleOp whose coordinates already treat
+     * 0 deg as "away from the driver" turns this off.
+     *
+     * @return true: the driver controls follow the alliance
+     */
+    protected boolean driverSideFollowsAlliance() {
+        return true;
+    }
+
+    /**
      * Runs once when INIT is pressed. Works out the starting pose and the alliance, creates the robot (which
      * initializes all hardware), gives it the alliance's HIVE cells, and sets the pose.
      */
@@ -121,11 +133,18 @@ public abstract class MatchTeleOp extends OpMode {
 
         robot = new Robot(hardwareMap);
         robot.setResetButtonResetsPosition(resetButtonResetsPosition());
+        boolean driverOnBlueSide = driverSideFollowsAlliance() && alliance == Alliance.BLUE;
+        robot.setDriverOnBlueSide(driverOnBlueSide);
         if (alliance != null) {
+            // The alliance's left/right cells are as seen from its own driver station. A driver on the other side
+            // (e.g. DriveTest aiming at blue from the red side) sees them the other way around, so swap them
+            boolean driverOnOtherAllianceSide = (alliance == Alliance.BLUE) != driverOnBlueSide;
+            ShotTarget leftCell = driverOnOtherAllianceSide ? alliance.rightCell : alliance.leftCell;
+            ShotTarget rightCell = driverOnOtherAllianceSide ? alliance.leftCell : alliance.rightCell;
             // Move the cells into this TeleOp's coordinates (no change for Pedro coordinates)
             double offsetInches = coordinateOffsetInches();
-            robot.setShotTargets(alliance.leftCell.shifted(-offsetInches, -offsetInches),
-                    alliance.rightCell.shifted(-offsetInches, -offsetInches));
+            robot.setShotTargets(leftCell.shifted(-offsetInches, -offsetInches),
+                    rightCell.shifted(-offsetInches, -offsetInches));
         }
         if (startPose != null) {
             robot.drivetrain.setPose(startPose);
@@ -286,6 +305,7 @@ public abstract class MatchTeleOp extends OpMode {
             telemetry.addData("WARNING", warningText);
         }
         telemetry.addData("Alliance", allianceText);
+        telemetry.addData("Driver Side", robot.isDriverOnBlueSide() ? "Blue" : "Red");
         telemetry.addData("Start Pose", startPoseSourceText);
     }
 }

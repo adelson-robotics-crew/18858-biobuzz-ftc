@@ -409,12 +409,14 @@ public class Drivetrain {
     }
 
     /**
-     * Makes the robot's current facing the new 0 deg heading, leaving x and y alone. Field-centric
-     * driving treats 0 deg as "away from the driver", so call this with the robot facing that way.
+     * Makes the robot's current facing the given heading, leaving x and y alone. Used to re-zero the heading with
+     * the robot facing away from the driver: 0 deg for the red driver, 180 deg for the blue driver.
      * Needed because the Pinpoint keeps its heading between OpModes; it is only cleared on power-up.
+     *
+     * @param headingRadians the heading the robot's current facing becomes, in radians
      */
-    public void resetHeading() {
-        follower.setHeading(0.0);
+    public void resetHeading(double headingRadians) {
+        follower.setHeading(headingRadians);
         releaseHeadingLock(); // the old locked heading was measured in the old frame
     }
 

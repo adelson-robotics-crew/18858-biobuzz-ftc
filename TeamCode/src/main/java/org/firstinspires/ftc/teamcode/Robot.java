@@ -31,6 +31,7 @@ public class Robot {
     public enum RobotSuperState {
         IDLE("Idle", Intake.State.IDLE, Shooter.State.IDLE),
         INTAKING("Intaking", Intake.State.INTAKING, Shooter.State.IDLE),
+        OUTTAKING("Outtaking", Intake.State.OUTTAKING, Shooter.State.IDLE),
         SHOOTING("Shooting", Intake.State.IDLE, Shooter.State.SHOOTING);
 
         public final String label;
@@ -83,6 +84,11 @@ public class Robot {
     // Whether RESET_HEADING_BUTTON resets the whole pose to (0, 0, 0 deg) instead of only the heading. Only the
     // practice TeleOp turns this on (see setResetButtonResetsPosition())
     private boolean resetButtonResetsPosition = false;
+
+    // Whether the driver stands on the blue side of the field (opposite the red driver). Pedro's +x is "away from
+    // the driver" only for the red driver; for the blue driver it's toward them, so the sticks are turned 180 deg
+    // (see setDriverOnBlueSide()). Only the driver's input changes: the odometry, autos, and aiming are untouched
+    private boolean driverOnBlueSide = false;
 
     // Wheel speed for a manual shot (SHOOT_BUTTON). Fixed at RobotConstants.SHOOTER_TARGET_RPM unless the bumpers
     // adjust it (only while RobotConstants.SHOOTER_RPM_ADJUST_ENABLED). Kept here rather than in the shooter so an
@@ -151,6 +157,26 @@ public class Robot {
     }
 
     /**
+     * Sets which side of the field the driver stands on, so field-centric "forward" is away from them. On the blue
+     * side the stick's forward and strafe are turned 180 deg, and RESET_HEADING_BUTTON makes the robot's current
+     * facing 180 deg (Pedro's "away from the blue driver") instead of 0 deg.
+     *
+     * @param onBlueSide true when the driver stands on the blue side; false (the default) for the red side
+     */
+    public void setDriverOnBlueSide(boolean onBlueSide) {
+        driverOnBlueSide = onBlueSide;
+    }
+
+    /**
+     * Tells which side of the field the driver controls are set up for.
+     *
+     * @return true if the controls are from the blue driver's side, false if from the red driver's side
+     */
+    public boolean isDriverOnBlueSide() {
+        return driverOnBlueSide;
+    }
+
+    /**
      * Updates every subsystem. Call this exactly once per OpMode loop.
      */
     public void update() {
@@ -173,14 +199,14 @@ public class Robot {
      * @param driverGamepad the gamepad that drives the robot (gamepad1 in the OpMode)
      */
     public void applyDriverControls(Gamepad driverGamepad) {
-        // Reset, once per press: the robot's current facing becomes 0 deg (+x), and in the practice TeleOp its
-        // position becomes (0, 0) too
+        // Reset, once per press: the robot's current facing becomes "away from the driver" (0 deg from the red side,
+        // 180 deg from the blue side), and in the practice TeleOp its position becomes (0, 0) too
         boolean resetHeadingPressed = RobotConstants.RESET_HEADING_BUTTON.test(driverGamepad);
         if (resetHeadingPressed && !resetHeadingWasPressed) {
             if (resetButtonResetsPosition) {
                 drivetrain.setPose(new Pose(0.0, 0.0, 0.0));
             } else {
-                drivetrain.resetHeading();
+                drivetrain.resetHeading(driverOnBlueSide ? Math.PI : 0.0);
             }
         }
         resetHeadingWasPressed = resetHeadingPressed;
@@ -204,10 +230,19 @@ public class Robot {
         double forward = applyDeadband(RobotConstants.DRIVE_FORWARD_AXIS.applyAsDouble(driverGamepad) * RobotConstants.DRIVE_FORWARD_AXIS_SIGN);
         double strafe = applyDeadband(RobotConstants.DRIVE_STRAFE_AXIS.applyAsDouble(driverGamepad) * RobotConstants.DRIVE_STRAFE_AXIS_SIGN);
         double turn = applyDeadband(RobotConstants.DRIVE_TURN_AXIS.applyAsDouble(driverGamepad) * RobotConstants.DRIVE_TURN_AXIS_SIGN);
+        if (driverOnBlueSide) {
+            // The blue driver faces the opposite way down the field, so turn the stick 180 deg (flip forward and
+            // strafe). Turning is clockwise/counterclockwise from either side, so it stays as is
+            forward = -forward;
+            strafe = -strafe;
+        }
 
-        // Intake is checked first, so if intake and a shoot button go down in the same loop, intake wins
+        // Intake is checked first, so if intake and a shoot button go down in the same loop, intake wins.
+        // Intake also wins over outtake when both are held
         if (RobotConstants.INTAKE_BUTTON.test(driverGamepad)) {
             requestIntake();
+        } else if (RobotConstants.OUTTAKE_BUTTON.test(driverGamepad)) {
+            requestOuttake();
         } else {
             stopIntake();
         }
@@ -337,6 +372,16 @@ public class Robot {
     public void requestIntake() {
         if (!shooter.isActive()) {
             intake.requestIntaking();
+        }
+    }
+
+    /**
+     * Starts outtaking (the intake run backwards), unless the shooter is running. In that case the request is
+     * rejected outright, not queued, so the outtake will not start later by itself.
+     */
+    public void requestOuttake() {
+        if (!shooter.isActive()) {
+            intake.requestOuttaking();
         }
     }
 

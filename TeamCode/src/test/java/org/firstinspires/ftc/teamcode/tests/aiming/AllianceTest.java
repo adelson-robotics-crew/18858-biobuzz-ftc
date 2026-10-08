@@ -64,9 +64,9 @@ public class AllianceTest {
         Pose redStart = redPose(58.664, 133.403, 90);
         Pose blueStart = Alliance.BLUE.fromRedSide(redStart);
 
-        // Red shoots its upper cell (X, the driver's left); blue shoots its lower cell (B, the driver's right)
+        // Red shoots its upper cell and blue its lower cell: on each side, the cell on that driver's left (X)
         assertAimMatchesStart(redStart, Alliance.RED.leftCell);
-        assertAimMatchesStart(blueStart, Alliance.BLUE.rightCell);
+        assertAimMatchesStart(blueStart, Alliance.BLUE.leftCell);
     }
 
     /**

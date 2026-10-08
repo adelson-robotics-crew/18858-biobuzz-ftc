@@ -6,18 +6,20 @@ import com.pedropathing.utils.Angle;
 import org.firstinspires.ftc.teamcode.RobotConstants;
 
 /**
- * Which alliance the robot is on, and the two HIVE cells that alliance shoots into, as the driver sees them.
+ * Which alliance the robot is on, and the two HIVE cells that alliance shoots into, as that alliance's driver sees
+ * them from their own driver station. The two driver stations face each other, so the red driver (facing +x) has
+ * the upper cell on their left, and the blue driver (facing -x) has the lower cell on their left.
  * In the Pedro Pathing visualizer the red hive is on the left half of the field and the blue hive on the right.
  * The robot can't sense its alliance: its coordinates are whatever its autonomous declared as the start, so the
  * alliance is chosen by picking the red or blue autonomous, which saves it (Robot.saveAlliance()) for the TeleOp.
  */
 public enum Alliance {
     RED("Red", ShotTarget.RED_UPPER, ShotTarget.RED_LOWER),
-    BLUE("Blue", ShotTarget.BLUE_UPPER, ShotTarget.BLUE_LOWER);
+    BLUE("Blue", ShotTarget.BLUE_LOWER, ShotTarget.BLUE_UPPER);
 
     public final String label;           // shown on telemetry
-    public final ShotTarget leftCell;    // the cell on the driver's left (the upper one)
-    public final ShotTarget rightCell;   // the cell on the driver's right (the lower one)
+    public final ShotTarget leftCell;    // the cell on this alliance's driver's left (X)
+    public final ShotTarget rightCell;   // the cell on this alliance's driver's right (B)
 
     /**
      * @param label     the name shown on telemetry
