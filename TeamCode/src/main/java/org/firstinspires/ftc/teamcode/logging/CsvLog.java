@@ -13,8 +13,8 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * Writes one CSV file per OpMode run to the Robot Controller, in /sdcard/FIRST/logs/, so a run can be replayed
- * and analyzed afterward. Pull the files off with: adb pull /sdcard/FIRST/logs/
+ * Writes one CSV file per OpMode run to the Robot Controller, in /sdcard/logs/, so a run can be replayed
+ * and analyzed afterward. Pull the files off with: adb pull /sdcard/logs/
  * No hardware. A file problem never stops the OpMode: if the file can't be written, logging just turns off,
  * getErrorMessage() says why, and the error is also written to the robot's logcat (tag CsvLog), which ends up in
  * the SDK's own /sdcard/FIRST/matchlogs/ file for the run.
@@ -42,7 +42,7 @@ public class CsvLog {
     public CsvLog(String opModeName, String... columnNames) {
         columnCount = columnNames.length;
         String timestamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date());
-        File logFolder = new File(AppUtil.ROOT_FOLDER, "logs"); // ROOT_FOLDER is /sdcard/FIRST
+        File logFolder = new File(AppUtil.ROOT_FOLDER, "logs"); // ROOT_FOLDER is /sdcard (not /sdcard/FIRST)
         logFile = new File(logFolder, opModeName + "_" + timestamp + ".csv");
         try {
             //noinspection ResultOfMethodCallIgnored -- an existing folder is fine; a real failure shows up on the next line

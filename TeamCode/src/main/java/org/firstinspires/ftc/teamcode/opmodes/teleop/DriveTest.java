@@ -1,63 +1,69 @@
 package org.firstinspires.ftc.teamcode.opmodes.teleop;
 
+import com.pedropathing.api.PoseFactory;
 import com.pedropathing.math.Pose;
-import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
-import org.firstinspires.ftc.teamcode.Robot;
-import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolution;
+import org.firstinspires.ftc.teamcode.subsystems.aiming.Alliance;
 
 /**
- * Field-centric TeleOp driven by Pedro Pathing. The robot's pose from the Pinpoint computer
- * is sent to telemetry, along with the shooter wheel's speed. Holding AIM_SHOOT_BUTTON aims and shoots
- * (see Robot.applyDriverControls()), and adds the shot's numbers to telemetry while held.
+ * The practice TeleOp: the same as the match TeleOp, but starting from the corner the shot measurements were
+ * taken from and aiming at the blue hive (the measured cell is the blue lower one, on B). It always starts from
+ * that corner, never from a carried-over pose.
+ * Its coordinates are the practice frame: (0, 0) is the robot in the practice corner (Pedro (8.5, 8.5)), which is
+ * what telemetry shows. The hive cells are shifted into that frame, so aiming is unchanged. The reset button (Back)
+ * resets the whole pose to (0, 0, 0 deg) here, not just the heading.
  */
 @TeleOp(name = "DriveTest")
-public class DriveTest extends OpMode {
-    private Robot robot;
+public class DriveTest extends MatchTeleOp {
 
     /**
-     * Runs once when INIT is pressed. Creates the robot, which initializes all hardware, and sets the pose to
-     * the start pose (bottom right corner, facing forward), so field-centric "forward" is whichever way the
-     * robot faces at INIT.
+     * Always aims at the blue hive, where the shot measurements were taken.
+     *
+     * @return Alliance.BLUE
      */
     @Override
-    public void init() {
-        robot = new Robot(hardwareMap);
-        // The Pinpoint keeps its pose from the previous OpMode; without this, a robot that ended an autonomous
-        // facing 180 deg would drive with forward/back and left/right reversed, and aiming would be off
-        robot.drivetrain.setPose(Robot.startPose());
-        robot.update(); // apply the start pose before the OpMode starts
+    protected Alliance fixedAlliance() {
+        return Alliance.BLUE;
     }
 
     /**
-     * Runs repeatedly after START. Applies the driver controls, updates the robot, then reports the robot
-     * pose, shooter, and (while aiming) shot numbers to telemetry.
+     * The robot placed in the practice corner, facing +x (away from the driver): (0, 0, 0 deg) in the practice frame.
+     *
+     * @return the practice starting pose
      */
     @Override
-    public void loop() {
-        robot.applyDriverControls(gamepad1);
-        robot.update();
+    protected Pose fallbackStartPose() {
+        return PoseFactory.degrees().of(0, 0, 0);
+    }
 
-        Pose robotPose = robot.drivetrain.getPose(); // position from the Pinpoint; inches for x/y, radians for heading
-        telemetry.addData("Robot X (in)", robotPose.x());
-        telemetry.addData("Robot Y (in)", robotPose.y());
-        telemetry.addData("Robot Heading (deg)", Math.toDegrees(robotPose.heading())); // radians -> degrees for reading
-        telemetry.addData("Heading Locked", robot.drivetrain.isHeadingLocked());
-        telemetry.addData("Robot State", robot.getSuperState().label);
+    /**
+     * The practice frame's (0, 0) is Pedro (8.5, 8.5), the frame the shot measurements were taken in.
+     *
+     * @return 8.5 inches
+     */
+    @Override
+    protected double coordinateOffsetInches() {
+        return 8.5;
+    }
 
-        ShotSolution shotSolution = robot.getShotSolution(); // null unless AIM_SHOOT_BUTTON is held
-        if (shotSolution != null) {
-            telemetry.addData("Shot READY", robot.isReadyToShoot());
-            telemetry.addData("Shot Position", shotSolution.validity.label);
-            telemetry.addData("Shot Distance (in)", "%.1f", shotSolution.distanceInches);
-            telemetry.addData("Shot Angle Off Center (deg)", "%.1f", shotSolution.angleOffCenterDegrees);
-            telemetry.addData("Shot Target Heading (deg)", "%.1f", Math.toDegrees(shotSolution.targetHeadingRadians));
-            telemetry.addData("Shot Heading Error (deg)", "%.1f", robot.getAimHeadingErrorDeg());
-            telemetry.addData("Shot Target RPM", "%.0f", shotSolution.targetRpm);
-            telemetry.addData("Shot Actual RPM", "%.0f", robot.shooter.getShooterRpm());
-        }
+    /**
+     * Back resets the whole pose to (0, 0, 0 deg), so the robot can be put back in the practice corner and re-zeroed.
+     *
+     * @return true
+     */
+    @Override
+    protected boolean resetButtonResetsPosition() {
+        return true;
+    }
 
-        telemetry.update();
+    /**
+     * Always starts from the practice corner, even right after another OpMode.
+     *
+     * @return false
+     */
+    @Override
+    protected boolean useCarriedPose() {
+        return false;
     }
 }

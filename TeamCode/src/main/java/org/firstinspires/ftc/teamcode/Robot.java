@@ -4,8 +4,10 @@ import com.pedropathing.math.Pose;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
+import org.firstinspires.ftc.teamcode.subsystems.aiming.Alliance;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolution;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolver;
+import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotTarget;
 import org.firstinspires.ftc.teamcode.subsystems.Intake;
 import org.firstinspires.ftc.teamcode.subsystems.Shooter;
 import org.firstinspires.ftc.teamcode.subsystems.drivetrain.Drivetrain;
@@ -64,6 +66,11 @@ public class Robot {
         }
     }
 
+    // The alliance of the last autonomous that ran. Static so it survives from the autonomous into the TeleOp (and
+    // into a TeleOp restarted mid-match) while the app keeps running; a power cycle or app restart clears it.
+    // Picking the red or blue auto is how the robot knows its side; it can't sense it
+    private static Alliance savedAlliance = null;
+
     public final Drivetrain drivetrain;
     public final Intake intake;
     public final Shooter shooter;
@@ -71,9 +78,25 @@ public class Robot {
     // Whether each shooter-RPM button was held last loop, so a hold counts as one press instead of one per loop
     private boolean shooterRpmUpWasPressed = false;
     private boolean shooterRpmDownWasPressed = false;
-    private boolean zeroPoseWasPressed = false;
+    private boolean resetHeadingWasPressed = false;
 
-    // The shot worked out from the robot's pose this loop while AIM_SHOOT_BUTTON is held, or null while it isn't
+    // Whether RESET_HEADING_BUTTON resets the whole pose to (0, 0, 0 deg) instead of only the heading. Only the
+    // practice TeleOp turns this on (see setResetButtonResetsPosition())
+    private boolean resetButtonResetsPosition = false;
+
+    // Wheel speed for a manual shot (SHOOT_BUTTON). Fixed at RobotConstants.SHOOTER_TARGET_RPM unless the bumpers
+    // adjust it (only while RobotConstants.SHOOTER_RPM_ADJUST_ENABLED). Kept here rather than in the shooter so an
+    // aimed shot, which sets the shooter to the shot table's RPM, can't change what the next manual shot uses
+    private double manualShotRpm = RobotConstants.SHOOTER_TARGET_RPM;
+
+    // The HIVE cells the aim buttons shoot into, as the driver sees them; set by the TeleOp for its alliance
+    // (see setShotTargets()). Null until set, and an aim button with no cell does nothing
+    private ShotTarget leftShotTarget = null;
+    private ShotTarget rightShotTarget = null;
+
+    // The cell being aimed at and the shot worked out from the robot's pose this loop, while an aim button is
+    // held; both null while neither is
+    private ShotTarget currentShotTarget = null;
     private ShotSolution currentShotSolution = null;
 
     /**
@@ -88,46 +111,95 @@ public class Robot {
     }
 
     /**
+     * Records which alliance the autonomous is running for, so the TeleOp that follows aims at the same hive.
+     * The autonomous calls this in init().
+     *
+     * @param alliance the autonomous's alliance
+     */
+    public static void saveAlliance(Alliance alliance) {
+        savedAlliance = alliance;
+    }
+
+    /**
+     * The alliance of the last autonomous that ran.
+     *
+     * @return the saved alliance, or null if no autonomous has run since the app started (e.g. after a power cycle)
+     */
+    public static Alliance getSavedAlliance() {
+        return savedAlliance;
+    }
+
+    /**
+     * Sets which HIVE cells AIM_LEFT_CELL_BUTTON and AIM_RIGHT_CELL_BUTTON shoot into. The TeleOp calls this once
+     * in init() with its alliance's cells.
+     *
+     * @param leftCell  the cell on the driver's left
+     * @param rightCell the cell on the driver's right
+     */
+    public void setShotTargets(ShotTarget leftCell, ShotTarget rightCell) {
+        leftShotTarget = leftCell;
+        rightShotTarget = rightCell;
+    }
+
+    /**
+     * Sets whether RESET_HEADING_BUTTON resets the whole pose to (0, 0, 0 deg) or only the heading.
+     *
+     * @param resetsPosition true to reset x, y, and heading; false (the default) to reset only the heading
+     */
+    public void setResetButtonResetsPosition(boolean resetsPosition) {
+        resetButtonResetsPosition = resetsPosition;
+    }
+
+    /**
      * Updates every subsystem. Call this exactly once per OpMode loop.
      */
     public void update() {
         drivetrain.update();
         intake.update();
-        // The indexer belongs to the shooter, so the intake can't run it; instead, run it backward while intaking
-        // to keep incoming balls off the shooter wheel
-        shooter.setIndexerReverse(intake.isActive());
-        shooter.update();
+        shooter.update(); // the indexer holds its rest angle by itself whenever it isn't feeding
     }
 
     /**
      * Reads the driver gamepad through the mapping in RobotConstants and sends the resulting
      * commands to the subsystems. Call once per TeleOp loop, before update().
-     * While AIM_SHOOT_BUTTON is held, the robot aims and shoots (see applyAimAndShoot()) instead of
-     * turning with the turn stick and shooting on SHOOT_BUTTON.
+     * Shooting, in priority order:
+     *   1. SHOOT_BUTTON held: manual shot. The driver turns with the turn stick and the wheel spins at the fixed
+     *      manual RPM; X/B are ignored while it's held.
+     *   2. AIM_LEFT_CELL_BUTTON or AIM_RIGHT_CELL_BUTTON held: the robot aims and shoots at that cell (see
+     *      applyAimAndShoot()): it turns itself to the shot heading and the wheel follows the shot table.
+     *   3. Neither: normal driving, shooter off.
+     * Nothing latches: as soon as SHOOT_BUTTON is released, holding X or B aims again.
      *
      * @param driverGamepad the gamepad that drives the robot (gamepad1 in the OpMode)
      */
     public void applyDriverControls(Gamepad driverGamepad) {
-        // Reset the localizer to the zero pose once per press
-        boolean zeroPosePressed = RobotConstants.ZERO_POSE_BUTTON.test(driverGamepad);
-        if (zeroPosePressed && !zeroPoseWasPressed) {
-            drivetrain.setPose(zeroPose());
+        // Reset, once per press: the robot's current facing becomes 0 deg (+x), and in the practice TeleOp its
+        // position becomes (0, 0) too
+        boolean resetHeadingPressed = RobotConstants.RESET_HEADING_BUTTON.test(driverGamepad);
+        if (resetHeadingPressed && !resetHeadingWasPressed) {
+            if (resetButtonResetsPosition) {
+                drivetrain.setPose(new Pose(0.0, 0.0, 0.0));
+            } else {
+                drivetrain.resetHeading();
+            }
         }
-        zeroPoseWasPressed = zeroPosePressed;
+        resetHeadingWasPressed = resetHeadingPressed;
 
-        // Bump the shooter target RPM once per press, only on the loop the button goes down.
-        // While aiming, the shot table sets the target every loop, so a bump there is overwritten right away.
-        boolean shooterRpmUpPressed = RobotConstants.SHOOTER_RPM_UP_BUTTON.test(driverGamepad);
-        if (shooterRpmUpPressed && !shooterRpmUpWasPressed) {
-            shooter.adjustTargetRpm(RobotConstants.SHOOTER_RPM_ADJUST_STEP);
-        }
-        shooterRpmUpWasPressed = shooterRpmUpPressed;
+        // Bump the manual shot RPM once per press, only on the loop the button goes down, and only while RPM
+        // adjusting is turned on (it's off for matches). Aimed shots use the shot table, so this doesn't affect them.
+        if (RobotConstants.SHOOTER_RPM_ADJUST_ENABLED) {
+            boolean shooterRpmUpPressed = RobotConstants.SHOOTER_RPM_UP_BUTTON.test(driverGamepad);
+            if (shooterRpmUpPressed && !shooterRpmUpWasPressed) {
+                adjustManualShotRpm(RobotConstants.SHOOTER_RPM_ADJUST_STEP);
+            }
+            shooterRpmUpWasPressed = shooterRpmUpPressed;
 
-        boolean shooterRpmDownPressed = RobotConstants.SHOOTER_RPM_DOWN_BUTTON.test(driverGamepad);
-        if (shooterRpmDownPressed && !shooterRpmDownWasPressed) {
-            shooter.adjustTargetRpm(-RobotConstants.SHOOTER_RPM_ADJUST_STEP);
+            boolean shooterRpmDownPressed = RobotConstants.SHOOTER_RPM_DOWN_BUTTON.test(driverGamepad);
+            if (shooterRpmDownPressed && !shooterRpmDownWasPressed) {
+                adjustManualShotRpm(-RobotConstants.SHOOTER_RPM_ADJUST_STEP);
+            }
+            shooterRpmDownWasPressed = shooterRpmDownPressed;
         }
-        shooterRpmDownWasPressed = shooterRpmDownPressed;
 
         double forward = applyDeadband(RobotConstants.DRIVE_FORWARD_AXIS.applyAsDouble(driverGamepad) * RobotConstants.DRIVE_FORWARD_AXIS_SIGN);
         double strafe = applyDeadband(RobotConstants.DRIVE_STRAFE_AXIS.applyAsDouble(driverGamepad) * RobotConstants.DRIVE_STRAFE_AXIS_SIGN);
@@ -140,15 +212,30 @@ public class Robot {
             stopIntake();
         }
 
-        if (RobotConstants.AIM_SHOOT_BUTTON.test(driverGamepad)) {
-            applyAimAndShoot(forward, strafe);
-            return;
+        boolean manualShootHeld = RobotConstants.SHOOT_BUTTON.test(driverGamepad);
+
+        // Aim and shoot, unless the manual shot button overrides it. Left is checked first, so if both aim buttons
+        // are held, the left cell wins
+        if (!manualShootHeld) {
+            if (RobotConstants.AIM_LEFT_CELL_BUTTON.test(driverGamepad) && leftShotTarget != null) {
+                applyAimAndShoot(leftShotTarget, forward, strafe);
+                return;
+            }
+            if (RobotConstants.AIM_RIGHT_CELL_BUTTON.test(driverGamepad) && rightShotTarget != null) {
+                applyAimAndShoot(rightShotTarget, forward, strafe);
+                return;
+            }
         }
 
+        // Manual shot or plain driving: the driver turns, and the wheel uses the fixed manual RPM
+        currentShotTarget = null;
         currentShotSolution = null;
         drivetrain.driveFieldCentric(forward, strafe, turn);
-        shooter.setFeedAllowed(true); // manual shooting feeds whenever the wheel is at speed, as before
-        if (RobotConstants.SHOOT_BUTTON.test(driverGamepad)) {
+        shooter.setFeedAllowed(true); // manual shooting feeds whenever the wheel is at speed
+        // Manual shots always use the fixed manual RPM, never the shot table: an aimed shot may have left the
+        // shooter at the table's RPM, so set it back every loop
+        shooter.setTargetRpm(manualShotRpm);
+        if (manualShootHeld) {
             requestShoot();
         } else {
             stopShoot();
@@ -161,11 +248,13 @@ public class Robot {
      * and lets the indexer feed only while the position is valid and the robot is aimed. The wheel keeps spinning
      * at the table RPM even while the position isn't valid, so it's already at speed once the robot lines up.
      *
+     * @param target  the HIVE cell to shoot into
      * @param forward the driver's forward power, from -1 to 1
      * @param strafe  the driver's sideways power, from -1 to 1
      */
-    private void applyAimAndShoot(double forward, double strafe) {
-        currentShotSolution = ShotSolver.solve(drivetrain.getPose());
+    private void applyAimAndShoot(ShotTarget target, double forward, double strafe) {
+        currentShotTarget = target;
+        currentShotSolution = ShotSolver.solve(drivetrain.getPose(), target);
         drivetrain.driveFieldCentricWithHeading(forward, strafe, currentShotSolution.targetHeadingRadians);
         shooter.setTargetRpm(currentShotSolution.targetRpm);
         shooter.setFeedAllowed(currentShotSolution.inRange && isAimed());
@@ -173,12 +262,41 @@ public class Robot {
     }
 
     /**
-     * The shot worked out this loop while AIM_SHOOT_BUTTON is held.
+     * Changes the manual shot RPM by the given amount, kept between RobotConstants.SHOOTER_MIN_TARGET_RPM and
+     * RobotConstants.SHOOTER_MAX_TARGET_RPM.
+     *
+     * @param rpmChange how much to add; negative to lower it
+     */
+    private void adjustManualShotRpm(double rpmChange) {
+        manualShotRpm = Math.max(RobotConstants.SHOOTER_MIN_TARGET_RPM,
+                Math.min(RobotConstants.SHOOTER_MAX_TARGET_RPM, manualShotRpm + rpmChange));
+    }
+
+    /**
+     * The wheel speed a manual shot (SHOOT_BUTTON) uses.
+     *
+     * @return the manual shot RPM
+     */
+    public double getManualShotRpm() {
+        return manualShotRpm;
+    }
+
+    /**
+     * The shot worked out this loop while an aim button is held.
      *
      * @return the current shot solution, or null while not aiming
      */
     public ShotSolution getShotSolution() {
         return currentShotSolution;
+    }
+
+    /**
+     * The HIVE cell being aimed at this loop.
+     *
+     * @return the current cell, or null while not aiming
+     */
+    public ShotTarget getShotTarget() {
+        return currentShotTarget;
     }
 
     /**
@@ -210,26 +328,6 @@ public class Robot {
      */
     public boolean isReadyToShoot() {
         return currentShotSolution != null && currentShotSolution.inRange && isAimed() && shooter.isAtSpeed();
-    }
-
-    /**
-     * The robot's starting pose (bottom right corner, facing forward), from RobotConstants.
-     *
-     * @return the start pose, with x and y in inches and heading in radians
-     */
-    public static Pose startPose() {
-        return new Pose(RobotConstants.START_POSE_X_INCHES, RobotConstants.START_POSE_Y_INCHES,
-                Math.toRadians(RobotConstants.START_POSE_HEADING_DEGREES));
-    }
-
-    /**
-     * The pose the localizer is set to when ZERO_POSE_BUTTON is pressed (bottom left corner), from RobotConstants.
-     *
-     * @return the zero pose, with x and y in inches and heading in radians
-     */
-    public static Pose zeroPose() {
-        return new Pose(RobotConstants.ZERO_POSE_X_INCHES, RobotConstants.ZERO_POSE_Y_INCHES,
-                Math.toRadians(RobotConstants.ZERO_POSE_HEADING_DEGREES));
     }
 
     /**

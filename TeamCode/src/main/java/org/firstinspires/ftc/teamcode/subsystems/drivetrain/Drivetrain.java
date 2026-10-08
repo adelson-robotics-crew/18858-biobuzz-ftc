@@ -27,6 +27,11 @@ import org.firstinspires.ftc.teamcode.subsystems.drivetrain.pedro.Constants;
  * Those commands also stop the drivetrain and finish if the robot stalls (e.g. drives into a wall), see StallDetector.
  */
 public class Drivetrain {
+    // The robot's pose as of the last update() in any OpMode. Static so it survives from one OpMode to the next
+    // (e.g. autonomous into TeleOp) while the app keeps running; a power cycle or app restart clears it.
+    // Read it with getSavedPose()
+    private static Pose lastSavedPose = null;
+
     private final Follower follower;
 
     // Turns heading error into turn power for the TeleOp heading lock (no I term: the D term uses the measured rotation speed)
@@ -34,6 +39,9 @@ public class Drivetrain {
             new PIDController(RobotConstants.HEADING_LOCK_P, 0.0, RobotConstants.HEADING_LOCK_D);
     // The heading (radians) the lock is holding, or null while unlocked (driver turning, or robot still settling)
     private Double lockedHeadingRadians = null;
+
+    // The turn power the aiming controller used last, kept for logging
+    private double lastAimTurnPower = 0.0;
 
     /**
      * Creates the Pedro follower, which sets up the motors and the Pinpoint localizer.
@@ -49,6 +57,18 @@ public class Drivetrain {
      */
     public void update() {
         follower.update();
+        // Save the pose every loop, so the next OpMode can pick up where this one left off
+        lastSavedPose = follower.pose();
+    }
+
+    /**
+     * The robot's pose as the previous OpMode last saw it (normally where the autonomous ended). Read this in
+     * init() before calling update(), which would overwrite it with the new OpMode's pose.
+     *
+     * @return the saved pose, or null if no OpMode has run since the app started (e.g. after a power cycle)
+     */
+    public static Pose getSavedPose() {
+        return lastSavedPose;
     }
 
     /**
@@ -100,7 +120,7 @@ public class Drivetrain {
     /**
      * Drives with field-centric translation from the driver while the robot turns itself to a target heading
      * (e.g. to aim the shooter). Unlike holdPose(), this doesn't lock position: the driver keeps full control of
-     * forward and strafe. Turn power is RobotConstants.HEADING_KP times the wrapped heading error, clamped to [-1, 1].
+     * forward and strafe. Turn power comes from aimTurnPower().
      *
      * @param forward              the requested forward power, from -1 to 1
      * @param strafe               the requested sideways power, from -1 to 1
@@ -110,10 +130,39 @@ public class Drivetrain {
         // The heading lock isn't used here, and its old heading would be stale once this turns the robot
         releaseHeadingLock();
         double currentHeadingRadians = follower.pose().heading();
-        // Angle.error is (target - current) wrapped into [-PI, PI), the same sign Pedro's own heading lock uses
-        double turnPower = RobotConstants.HEADING_KP * Angle.error(currentHeadingRadians, targetHeadingRadians);
-        turnPower = Math.max(-1.0, Math.min(1.0, turnPower));
-        follower.manual(ManualDrive.fieldCentric(forward, strafe, turnPower, currentHeadingRadians));
+        lastAimTurnPower = aimTurnPower(currentHeadingRadians, targetHeadingRadians);
+        follower.manual(ManualDrive.fieldCentric(forward, strafe, lastAimTurnPower, currentHeadingRadians));
+    }
+
+    /**
+     * The turn power that turns the robot toward a target heading while aiming: proportional to the heading error,
+     * braked by how fast the robot is already turning, plus a minimum push to overcome friction (see the HEADING_*
+     * constants in RobotConstants). Positive turn power turns counterclockwise, which is the way the heading grows.
+     *
+     * @param currentHeadingRadians the robot's heading now
+     * @param targetHeadingRadians  the heading to turn to
+     * @return the turn power, from -1 to 1
+     */
+    private double aimTurnPower(double currentHeadingRadians, double targetHeadingRadians) {
+        // Angle.error is (target - current) wrapped into [-PI, PI), so it's positive when the target is
+        // counterclockwise of the robot, the same sign Pedro's own heading lock uses
+        double headingErrorRadians = Angle.error(currentHeadingRadians, targetHeadingRadians);
+        double turnRateRadiansPerSecond = follower.velocity().omega; // positive while turning counterclockwise
+        double turnPower = RobotConstants.HEADING_KP * headingErrorRadians
+                - RobotConstants.HEADING_KD * turnRateRadiansPerSecond;
+        if (Math.abs(Math.toDegrees(headingErrorRadians)) > RobotConstants.HEADING_KS_DEADBAND_DEG) {
+            turnPower += Math.signum(headingErrorRadians) * RobotConstants.HEADING_KS;
+        }
+        return Math.max(-1.0, Math.min(1.0, turnPower));
+    }
+
+    /**
+     * The turn power the last driveFieldCentricWithHeading() call used, for logging.
+     *
+     * @return the last aiming turn power, from -1 to 1
+     */
+    public double getLastAimTurnPower() {
+        return lastAimTurnPower;
     }
 
     /**
@@ -219,6 +268,14 @@ public class Drivetrain {
                     return false;
                 })
         );
+    }
+
+    /**
+     * Stops the drivetrain: the follower goes idle and update() turns the drive motors off, so the robot sits still
+     * (e.g. while the autonomous shoots) without trying to correct its position.
+     */
+    public void stop() {
+        follower.stop();
     }
 
     /**

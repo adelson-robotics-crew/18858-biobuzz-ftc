@@ -23,7 +23,8 @@ public final class RobotConstants {
 
     // Shooter
     public static final String SHOOTER_MOTOR_NAME = "shooter";           // DC motor
-    public static final String INDEXER_SERVO_NAME = "indexer";           // continuous-rotation servo
+    public static final String INDEXER_SERVO_NAME = "indexer";           // Axon servo in continuous mode (configure as a Continuous Rotation Servo)
+    public static final String INDEXER_ENCODER_NAME = "indexer_encoder"; // the Axon's position feedback wire, on analog port 0 (configure as an Analog Input)
 
     // =====================================================================================
     // GAMEPAD BUTTON MAPPING
@@ -44,42 +45,41 @@ public final class RobotConstants {
     // Mechanisms (hold to run; the robot won't run the intake and shooter at the same time)
     // Triggers are analog (0 to 1), so a trigger counts as pressed once it's pulled past TRIGGER_PRESSED_THRESHOLD.
     public static final double TRIGGER_PRESSED_THRESHOLD = 0.5;
-    public static final Predicate<Gamepad> INTAKE_BUTTON = gamepad -> gamepad.right_trigger > TRIGGER_PRESSED_THRESHOLD;
-    // Spins the flywheel; the indexer feeds automatically whenever the wheel is up to speed
-    public static final Predicate<Gamepad> SHOOT_BUTTON = gamepad -> gamepad.left_trigger > TRIGGER_PRESSED_THRESHOLD;
+    public static final Predicate<Gamepad> INTAKE_BUTTON = gamepad -> gamepad.left_trigger > TRIGGER_PRESSED_THRESHOLD;
+    // Manual shot: spins the flywheel at the fixed SHOOTER_TARGET_RPM (not the shot table, so it still works if the
+    // robot's position is off) and the indexer feeds automatically whenever the wheel is up to speed. The driver
+    // drives to the usual spot and shoots from there.
+    public static final Predicate<Gamepad> SHOOT_BUTTON = gamepad -> gamepad.right_trigger > TRIGGER_PRESSED_THRESHOLD;
 
     // Shooter RPM tuning on the fly. Each press (not hold) bumps the shooter target RPM by SHOOTER_RPM_ADJUST_STEP.
+    // Off for matches, so a bumper pressed by accident can't change the shooting speed. Turn on to tune RPM.
+    public static final boolean SHOOTER_RPM_ADJUST_ENABLED = false;
     public static final Predicate<Gamepad> SHOOTER_RPM_UP_BUTTON = gamepad -> gamepad.right_bumper;
     public static final Predicate<Gamepad> SHOOTER_RPM_DOWN_BUTTON = gamepad -> gamepad.left_bumper;
 
-    // Aim and shoot (hold): the robot turns to face the shooter at the target while the left stick still drives,
+    // Aim and shoot (hold): the robot turns to face the shooter at a HIVE cell while the left stick still drives,
     // the shooter spins at the shot table's RPM for the current distance, and the indexer feeds only while the
     // position is valid (distance and angle), the heading is within HEADING_TOLERANCE_DEG, and the wheel is at speed.
     // The turn stick is ignored while held. Release to go back to normal driving; the shooter stops.
-    public static final Predicate<Gamepad> AIM_SHOOT_BUTTON = gamepad -> gamepad.x;
+    // Left and right are as the driver sees them; which cell each one is depends on the alliance (see the TeleOp).
+    // If both are held, left wins.
+    public static final Predicate<Gamepad> AIM_LEFT_CELL_BUTTON = gamepad -> gamepad.x;
+    public static final Predicate<Gamepad> AIM_RIGHT_CELL_BUTTON = gamepad -> gamepad.b;
 
-    // Zero pose: with the robot in the bottom left corner, one press sets the localizer to the zero pose
-    // (see the Zero pose constants below).
-    public static final Predicate<Gamepad> ZERO_POSE_BUTTON = gamepad -> gamepad.b;
+    // Emergency heading reset (one press): with the robot facing straight away from the driver (+x, the way the
+    // forward stick drives), sets the heading to 0 deg. In Match TeleOp x and y are left alone; it's only for when the
+    // heading has drifted or the robot got spun. In DriveTest it resets the whole pose to (0, 0, 0 deg), so put the
+    // robot back in the practice corner, facing away from the driver, before pressing it.
+    // "back" is the small button on the left side above the mode button (labeled Share on PlayStation controllers).
+    public static final Predicate<Gamepad> RESET_HEADING_BUTTON = gamepad -> gamepad.back;
 
     // =====================================================================================
     // TUNABLE ROBOT CONSTANTS
     // =====================================================================================
 
     // Field positions
-    // Pedro coordinates: x and y in inches, heading in degrees (counterclockwise is positive).
-    // x = forward and y = left, as seen from the starting pose.
-
-    // Where the robot is at INIT: always placed in the bottom right corner, facing forward.
-    // The TeleOp sets the localizer to this pose, so the field positions below are measured from here.
-    public static final double START_POSE_X_INCHES = 0.0;
-    public static final double START_POSE_Y_INCHES = 0.0;
-    public static final double START_POSE_HEADING_DEGREES = 0.0;
-
-    // What the localizer is set to when ZERO_POSE_BUTTON is pressed with the robot in the bottom left corner.
-    public static final double ZERO_POSE_X_INCHES = 0.0;
-    public static final double ZERO_POSE_Y_INCHES = 0.0;
-    public static final double ZERO_POSE_HEADING_DEGREES = 0.0;
+    // Everything uses Pedro field coordinates: x and y in inches, heading in degrees (counterclockwise is positive).
+    // Each OpMode sets its own starting pose (the autos in their routine, the TeleOps in their red/blue wrapper).
 
     // Driver input
 
@@ -90,7 +90,8 @@ public final class RobotConstants {
     // Drivetrain
 
     // A drive command (follow a path, hold a pose) counts as finished once the robot is within
-    // these distances of its target pose, in both position and heading.
+    // these distances of its target pose, in both position and heading. The same tolerances are used at INIT to
+    // check that the odometry really took the starting pose (see Drivetrain.isAtPose()).
     public static final double DRIVE_POSITION_TOLERANCE_INCHES = 1.0;
     public static final double DRIVE_HEADING_TOLERANCE_DEGREES = 3.0;
 
@@ -127,14 +128,12 @@ public final class RobotConstants {
 
     // Shooter
 
-    // Starting speed the shooter wheel is held at while shooting, in RPM of the motor's output shaft.
-    // The driver can bump it up/down during TeleOp (SHOOTER_RPM_UP_BUTTON / SHOOTER_RPM_DOWN_BUTTON); once a
-    // good value is found from telemetry, copy it here.
+    // Speed the shooter wheel is held at for a manual shot (SHOOT_BUTTON), in RPM of the motor's output shaft.
+    // Aim-and-shoot uses the shot table instead. With SHOOTER_RPM_ADJUST_ENABLED on, the bumpers bump the manual
+    // speed up/down during TeleOp; once a good value is found from telemetry, copy it here.
     // Held with setVelocity(), so it stays the same as the battery drains. Keep it comfortably below
     // the motor's free speed (6000 RPM) so the controller has headroom on a low battery.
-    // 2500 is (rounded) the same wheel speed the code used to call "130 RPM": that label came from the old,
-    // wrong ticks-per-rev (537.7), which made every reading 537.7 / 28 = 19.2x too low. 130 * 19.2 = 2496.4.
-    public static final double SHOOTER_TARGET_RPM = 2500.0;
+    public static final double SHOOTER_TARGET_RPM = 2425.0;
 
     // How much one press of SHOOTER_RPM_UP_BUTTON / SHOOTER_RPM_DOWN_BUTTON changes the target RPM.
     public static final double SHOOTER_RPM_ADJUST_STEP = 50.0;
@@ -150,12 +149,32 @@ public final class RobotConstants {
     // when the wheel sags a little as a ball goes through. The indexer feeds only while the wheel is at speed.
     public static final double INDEXER_START_FEED_RPM_TOLERANCE = 25.0;
     public static final double INDEXER_STOP_FEED_RPM_TOLERANCE = 50.0;
-    public static final double INDEXER_SERVO_POWER = -0.2; // feeds balls into the shooter wheel (half speed)
-    // While the intake is running, the indexer runs backward at this fraction of its feeding speed,
-    // so balls coming in are kept off the shooter wheel.
-    public static final double INDEXER_INTAKE_REVERSE_SPEED_FRACTION = 0.25;
-    // Opposite direction from feeding, at INDEXER_INTAKE_REVERSE_SPEED_FRACTION of the feeding speed
-    public static final double INDEXER_INTAKE_REVERSE_SERVO_POWER = -INDEXER_SERVO_POWER * INDEXER_INTAKE_REVERSE_SPEED_FRACTION;
+    // Power the indexer spins at while feeding (the sign is the feeding direction). The Axon is brushless and fast,
+    // so this is kept low
+    public static final double INDEXER_SERVO_POWER = -0.2;
+
+    // Indexer rest positions. Whenever the indexer isn't feeding, it turns to the nearest rest angle and holds there
+    // so balls can't feed through. Angles are measured from where the indexer is at INIT (that's 0 deg, so put it in
+    // a rest position before pressing INIT); there's a rest angle every INDEXER_REST_SPACING_DEG (0, 90, 180, 270).
+    public static final double INDEXER_REST_SPACING_DEG = 90.0;
+    // +1.0 if positive servo power makes the encoder angle go up, -1.0 if it makes it go down. If the indexer won't
+    // settle at rest (it keeps spinning or runs away when it should stop), flip this.
+    // -1.0: the 12:56 DriveTest log showed the angle going up while feeding at negative power. With +1.0 the rest
+    // controller pushed away from rest and swung back and forth by up to 45 deg.
+    public static final double INDEXER_ENCODER_DIRECTION = -1.0;
+    // The Axon's feedback voltage covers one full turn (0 V to the hub's max analog voltage = 0 to 360 deg).
+    public static final double INDEXER_ENCODER_DEGREES_PER_TURN = 360.0;
+    // Rest-holding controller: servo power per degree off the rest angle, clamped to INDEXER_REST_MAX_POWER.
+    // Within INDEXER_REST_TOLERANCE_DEG it counts as at rest and the power is 0, so the servo doesn't buzz.
+    // Outside it, at least INDEXER_REST_MIN_POWER is used so friction can't stall it a few degrees short.
+    // Strong enough to hold the indexer in place while the robot turns, but not so strong it wobbles. At 0.2 power
+    // the Axon turns about 12 deg per loop, so the power near rest stays well below that. If it wobbles around
+    // rest, lower INDEXER_REST_KP; if it gets knocked off rest too easily, raise it.
+    // History: 0.005 / 0.1 held too weakly, 0.012 / 0.2 was jerky.
+    public static final double INDEXER_REST_KP = 0.004;
+    public static final double INDEXER_REST_MAX_POWER = 1.0;
+    public static final double INDEXER_REST_MIN_POWER = 0.04;
+    public static final double INDEXER_REST_TOLERANCE_DEG = 3.0;
 
     // Velocity PIDF gains the motor controller uses to hold the shooter wheel at the target RPM (setVelocity()).
     // While SHOOTER_USE_CUSTOM_VELOCITY_PIDF is false, the controller keeps its default gains and these four
@@ -185,13 +204,22 @@ public final class RobotConstants {
     // so a wheel that never settles can't keep the robot from parking.
     public static final double AUTO_SPIN_UP_TIMEOUT_SECONDS = 3.0;
 
-    // Shot aiming (AIM_SHOOT_BUTTON)
-    // Our field frame: the frame the robot's pose reports. (0, 0) is the bottom right corner, (124, 124) the top left,
-    // in inches. Heading 0 = +x, counterclockwise positive.
+    // Shot aiming (AIM_LEFT_CELL_BUTTON / AIM_RIGHT_CELL_BUTTON), in Pedro field coordinates.
 
-    // The HIVE target point: the least-squares intersection of all measured shot headings.
-    public static final double SHOT_TARGET_X_INCHES = 72.95;
-    public static final double SHOT_TARGET_Y_INCHES = 47.56;
+    // THE MEASURED CELL: the BLUE hive's LOWER-RIGHT cell, as seen in the Pedro Pathing visualizer. Every shot
+    // measurement and the shot table below were taken against this one cell. The other three cells are derived from
+    // it by symmetry (see ShotTarget), so this is the only cell position stored.
+    // The point is the least-squares intersection of all measured shot headings. It was measured as (72.95, 47.56)
+    // in the old TeleOp frame, which is Pedro minus 8.5 in on x and y.
+    public static final double MEASURED_CELL_X_INCHES = 81.45;
+    public static final double MEASURED_CELL_Y_INCHES = 56.06;
+    // Direction from the measured cell to the spot straight in front of it: it's shot from below (-y), i.e. 270 deg
+    public static final double MEASURED_CELL_FRONT_DIRECTION_DEGREES = 270.0;
+
+    // The point the field is symmetric about. The four cells are mirror images of each other around it:
+    // blue lower (81.45, 56.06), blue upper (81.45, 85.44), red upper (60.05, 85.44), red lower (60.05, 56.06).
+    public static final double FIELD_SYMMETRY_CENTER_X_INCHES = 70.75;
+    public static final double FIELD_SYMMETRY_CENTER_Y_INCHES = 70.75;
 
     // Distance (inches from the target) -> shooter motor RPM, linearly interpolated between rows (see ShotTable).
     // Distances must be ascending. The curve is deliberately U-shaped: close in, the shot needs more speed to
@@ -204,16 +232,29 @@ public final class RobotConstants {
     public static final double SHOT_MIN_DISTANCE_INCHES = 43.0;
     public static final double SHOT_MAX_DISTANCE_INCHES = 62.4;
 
-    // A position is also only valid within this many degrees either side of straight in front of the target
-    // (straight in front = directly -y from it).
+    // A position is also only valid within this many degrees either side of straight in front of the cell
+    // (see ShotTarget.frontDirectionDegrees).
     public static final double MAX_ANGLE_OFF_CENTER_DEG = 45.0;
 
     // The indexer only feeds once the robot's heading is within this many degrees of the shooting heading.
     // Every measured scoring shot was within 5 deg of the computed heading.
     public static final double HEADING_TOLERANCE_DEG = 3.0;
 
-    // Turn power per radian of heading error while aiming (P only), clamped to [-1, 1].
-    public static final double HEADING_KP = 1.0;
+    // Aiming turn controller (X/B held): turn power = HEADING_KP * error - HEADING_KD * turn rate, plus HEADING_KS
+    // in the direction of the error while the error is bigger than HEADING_KS_DEADBAND_DEG, clamped to [-1, 1].
+    // P alone (the old controller) asked for too little power near the target to overcome friction, so the robot
+    // stalled a few degrees short of HEADING_TOLERANCE_DEG and never fed. Tune on the robot with the TeleOp log:
+    //   stops short of the target -> raise HEADING_KS;  wobbles back and forth -> raise HEADING_KD or lower HEADING_KP;
+    //   turns too slowly from far away -> raise HEADING_KP.
+    // Turn power per radian of heading error
+    public static final double HEADING_KP = 1.2;
+    // Turn power per radian/second of turning, subtracted to brake the turn as it nears the target
+    public static final double HEADING_KD = 0.06;
+    // Minimum turn power that overcomes friction, added in the direction of the error
+    public static final double HEADING_KS = 0.07;
+    // Below this much error, HEADING_KS is left off so the robot doesn't jitter around the target. Must be smaller
+    // than HEADING_TOLERANCE_DEG so the robot still gets inside the tolerance.
+    public static final double HEADING_KS_DEADBAND_DEG = 1.0;
 
     /**
      * Not meant to be instantiated; this class only holds constants.

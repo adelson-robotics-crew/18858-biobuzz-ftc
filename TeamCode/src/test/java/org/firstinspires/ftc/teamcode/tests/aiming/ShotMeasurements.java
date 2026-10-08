@@ -1,8 +1,10 @@
 package org.firstinspires.ftc.teamcode.tests.aiming;
 
 /**
- * The raw shot measurements the shot table was built from (our field frame), shared by the tests.
+ * The raw shot measurements the shot table was built from, shared by the tests. All taken against the measured
+ * cell (the blue hive's lower-right cell, ShotTarget.BLUE_LOWER).
  * Each row: x (in), y (in), measured heading (deg), min working RPM, max working RPM.
+ * x and y are as recorded, in the old TeleOp frame; use pedroX() / pedroY() to get Pedro field coordinates.
  */
 final class ShotMeasurements {
     static final double[][] ROWS = {
@@ -22,10 +24,33 @@ final class ShotMeasurements {
     static final int MIN_RPM = 3;
     static final int MAX_RPM = 4;
 
+    // The old TeleOp frame is Pedro minus this much on both x and y
+    static final double OLD_FRAME_TO_PEDRO_OFFSET_INCHES = 8.5;
+
     /**
      * Not meant to be instantiated; this class only holds data.
      */
     private ShotMeasurements() {
+    }
+
+    /**
+     * A row's x in Pedro field coordinates.
+     *
+     * @param row a measurement row
+     * @return the row's x converted from the old TeleOp frame to Pedro
+     */
+    static double pedroX(double[] row) {
+        return row[X] + OLD_FRAME_TO_PEDRO_OFFSET_INCHES;
+    }
+
+    /**
+     * A row's y in Pedro field coordinates.
+     *
+     * @param row a measurement row
+     * @return the row's y converted from the old TeleOp frame to Pedro
+     */
+    static double pedroY(double[] row) {
+        return row[Y] + OLD_FRAME_TO_PEDRO_OFFSET_INCHES;
     }
 
     /**

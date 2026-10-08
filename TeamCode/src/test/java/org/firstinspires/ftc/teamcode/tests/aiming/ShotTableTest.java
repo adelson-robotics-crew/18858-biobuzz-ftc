@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 
 import org.firstinspires.ftc.teamcode.RobotConstants;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotTable;
+import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotTarget;
 import org.junit.Test;
 
 /**
@@ -63,8 +64,8 @@ public class ShotTableTest {
     @Test
     public void tableRpmFallsInsideEveryMeasuredWindow() {
         for (double[] row : ShotMeasurements.ROWS) {
-            double distanceInches = Math.hypot(RobotConstants.SHOT_TARGET_X_INCHES - row[ShotMeasurements.X],
-                    RobotConstants.SHOT_TARGET_Y_INCHES - row[ShotMeasurements.Y]);
+            double distanceInches = Math.hypot(ShotTarget.BLUE_LOWER.xInches - ShotMeasurements.pedroX(row),
+                    ShotTarget.BLUE_LOWER.yInches - ShotMeasurements.pedroY(row));
             double tableRpm = shotTable.rpmAt(distanceInches);
             assertTrue(ShotMeasurements.describe(row) + " table RPM " + tableRpm + " outside window",
                     tableRpm >= row[ShotMeasurements.MIN_RPM] && tableRpm <= row[ShotMeasurements.MAX_RPM]);

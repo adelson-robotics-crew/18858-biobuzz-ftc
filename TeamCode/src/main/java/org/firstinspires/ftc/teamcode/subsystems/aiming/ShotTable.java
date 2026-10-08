@@ -12,7 +12,8 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
  * The curve is deliberately U-shaped: close in, the shot needs more speed to clear the front lip of the CELL.
  * Don't smooth it into a line.
  *
- * Raw measurements behind the table (our field frame: inches, heading in degrees, 0 = +x, CCW positive).
+ * Raw measurements behind the table, all against the measured cell (ShotTarget.BLUE_LOWER). Positions are in the
+ * old TeleOp frame (Pedro minus 8.5 in on x and y): inches, heading in degrees, 0 = +x, CCW positive.
  * RPMs are shooter motor RPM as shown on telemetry (28 ticks/rev). Keep these for future tuning.
  *   x       y      heading  minRPM  maxRPM
  *   73.5    2.88   270.5    2350    2500

@@ -29,7 +29,8 @@ public final class ShotSolution {
     public final double distanceInches;      // straight-line distance from the robot to the target
     public final double targetHeadingRadians; // heading that points the shooter (the robot's back) at the target, in [-PI, PI)
     public final double targetRpm;            // shooter RPM from the shot table for this distance
-    public final double angleOffCenterDegrees; // 0 = straight -y from the target; negative = left side, positive = right side
+    // 0 = straight in front of the cell; the sign says which side (counterclockwise around the cell is positive)
+    public final double angleOffCenterDegrees;
     public final Validity validity;
     public final boolean inRange;             // true when validity is VALID
 

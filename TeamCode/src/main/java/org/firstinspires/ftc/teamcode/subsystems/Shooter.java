@@ -1,5 +1,6 @@
 package org.firstinspires.ftc.teamcode.subsystems;
 
+import com.qualcomm.robotcore.hardware.AnalogInput;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
@@ -9,8 +10,8 @@ import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import org.firstinspires.ftc.teamcode.RobotConstants;
 
 /**
- * The shooter: a DC motor that spins the shooting wheel, plus a continuous-rotation servo (the indexer)
- * that feeds balls into it. Only Robot decides when the shooter may run (see Robot.requestShoot()).
+ * The shooter: a DC motor that spins the shooting wheel, plus the indexer that feeds balls into it: an Axon servo
+ * in continuous mode, whose feedback wire (an analog input) reports its angle within one turn. Only Robot decides when the shooter may run (see Robot.requestShoot()).
  * While shooting, the wheel is held at a fixed RPM with closed-loop velocity control, so its speed
  * doesn't drop as the battery drains. The indexer is not requested separately: it feeds automatically
  * while the wheel is being driven (SHOOTING), the wheel is at speed, and Robot allows feeding (setFeedAllowed()).
@@ -18,8 +19,9 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
  * target to count, and stops counting once it's more than RobotConstants.INDEXER_STOP_FEED_RPM_TOLERANCE away.
  * So a ball is never fed into a wheel that is too slow (still spinning up, coasting down) or too fast
  * (overshooting after a spin-up or a target change), and the indexer doesn't flicker when a ball briefly drags
- * the wheel down. Robot can also have the indexer run backward with setIndexerReverse() (it does this while the
- * intake runs), which applies whenever the indexer isn't feeding.
+ * the wheel down. Whenever the indexer isn't feeding, it turns to the nearest rest angle and holds there, so balls
+ * can't feed through (see IndexerRest). Rest angles are every RobotConstants.INDEXER_REST_SPACING_DEG from where the
+ * indexer was at INIT.
  * The target RPM starts at RobotConstants.SHOOTER_TARGET_RPM and can be adjusted at runtime with adjustTargetRpm()
  * (so the right shooting speed can be found on the field) or set outright with setTargetRpm().
  */
@@ -31,10 +33,12 @@ public class Shooter {
 
     private final DcMotorEx shooterMotor; // DcMotorEx (not DcMotor) so the encoder velocity can be read and set
     private final CRServo indexerServo;
+    private final AnalogInput indexerEncoder; // the Axon's position feedback: 0 V to max voltage = one full turn
+    private final double indexerZeroAngleDegrees; // the encoder's angle at INIT; rest angles are measured from here
     private State state = State.IDLE; // flywheel state
     private double peakShooterRpm = 0.0; // highest RPM magnitude seen since init, for finding the motor's max speed
     private double targetRpm = RobotConstants.SHOOTER_TARGET_RPM; // wheel speed held while shooting; adjustable at runtime
-    private boolean indexerReverseRequested = false; // whether Robot wants the indexer running backward (set every loop)
+    private boolean indexerFeeding = false; // whether the indexer fed this loop (otherwise it was holding rest)
     private boolean feedAllowed = true; // whether Robot allows the indexer to feed (e.g. only once aimed); set every loop
     private boolean wheelAtSpeed = false; // the hysteresis latch: true once within the start tolerance, until past the stop tolerance
     /**
@@ -45,6 +49,9 @@ public class Shooter {
     public Shooter(HardwareMap hardwareMap) {
         shooterMotor = hardwareMap.get(DcMotorEx.class, RobotConstants.SHOOTER_MOTOR_NAME);
         indexerServo = hardwareMap.get(CRServo.class, RobotConstants.INDEXER_SERVO_NAME);
+        indexerEncoder = hardwareMap.get(AnalogInput.class, RobotConstants.INDEXER_ENCODER_NAME);
+        // Wherever the indexer is at INIT is 0 deg, so it should be placed in a rest position before INIT
+        indexerZeroAngleDegrees = readIndexerEncoderDegrees();
         // Lets the motor controller use the encoder to hold the speed passed to setVelocity()
         shooterMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         if (RobotConstants.SHOOTER_USE_CUSTOM_VELOCITY_PIDF) {
@@ -83,14 +90,62 @@ public class Shooter {
             wheelAtSpeed = rpmError <= RobotConstants.INDEXER_START_FEED_RPM_TOLERANCE;
         }
 
-        // Feed while the wheel is at speed and Robot allows it; otherwise run backward if Robot asked for it, or stop
-        if (wheelAtSpeed && feedAllowed) {
+        // Feed while the wheel is at speed and Robot allows it; otherwise turn to the nearest rest angle and hold it
+        indexerFeeding = wheelAtSpeed && feedAllowed;
+        if (indexerFeeding) {
             indexerServo.setPower(RobotConstants.INDEXER_SERVO_POWER);
-        } else if (indexerReverseRequested) {
-            indexerServo.setPower(RobotConstants.INDEXER_INTAKE_REVERSE_SERVO_POWER);
         } else {
-            indexerServo.setPower(0.0);
+            indexerServo.setPower(IndexerRest.powerToRest(getIndexerErrorToRestDegrees()));
         }
+    }
+
+    /**
+     * Reads the indexer's raw angle from the Axon's feedback voltage.
+     *
+     * @return the encoder angle, from 0 to 360 deg
+     */
+    private double readIndexerEncoderDegrees() {
+        // The feedback voltage sweeps from 0 to the hub's max analog voltage over one turn
+        return indexerEncoder.getVoltage() / indexerEncoder.getMaxVoltage()
+                * RobotConstants.INDEXER_ENCODER_DEGREES_PER_TURN;
+    }
+
+    /**
+     * The raw voltage on the indexer's feedback wire, for checking the wiring: it should sweep from about 0 V up to
+     * the hub's max analog voltage (about 3.3 V) as the indexer turns once. Stuck near 0 V means no signal.
+     *
+     * @return the feedback voltage, in volts
+     */
+    public double getIndexerEncoderVoltage() {
+        return indexerEncoder.getVoltage();
+    }
+
+    /**
+     * The indexer's angle from where it was at INIT, in the direction positive servo power turns it.
+     *
+     * @return the angle, in [0, 360) deg
+     */
+    public double getIndexerAngleDegrees() {
+        return IndexerRest.angleFromStartDegrees(readIndexerEncoderDegrees(), indexerZeroAngleDegrees,
+                RobotConstants.INDEXER_ENCODER_DIRECTION);
+    }
+
+    /**
+     * How far the indexer is from the nearest rest angle.
+     *
+     * @return the turn to the nearest rest angle, in degrees (positive = the positive-power way)
+     */
+    public double getIndexerErrorToRestDegrees() {
+        return IndexerRest.errorToNearestRestDegrees(getIndexerAngleDegrees(), RobotConstants.INDEXER_REST_SPACING_DEG);
+    }
+
+    /**
+     * Tells whether the indexer fed balls this loop, as of the last update().
+     *
+     * @return true while feeding; false while it's holding (or turning back to) a rest angle
+     */
+    public boolean isIndexerFeeding() {
+        return indexerFeeding;
     }
 
     /**
@@ -132,17 +187,6 @@ public class Shooter {
     public void setTargetRpm(double newTargetRpm) {
         targetRpm = Math.max(RobotConstants.SHOOTER_MIN_TARGET_RPM,
                 Math.min(RobotConstants.SHOOTER_MAX_TARGET_RPM, newTargetRpm));
-    }
-
-    /**
-     * Sets whether the indexer should run backward at RobotConstants.INDEXER_INTAKE_REVERSE_SERVO_POWER.
-     * Feeding still takes priority, so this only matters while the indexer isn't feeding.
-     * Robot sets this every loop from whether the intake is running.
-     *
-     * @param reverseRequested true to run the indexer backward; false to leave it stopped when not feeding
-     */
-    public void setIndexerReverse(boolean reverseRequested) {
-        indexerReverseRequested = reverseRequested;
     }
 
     /**

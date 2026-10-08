@@ -13,26 +13,29 @@ import com.pedropathing.ivy.Scheduler;
 import com.pedropathing.math.Pose;
 import com.pedropathing.math.Velocity;
 import com.pedropathing.paths.Path;
-import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.util.ElapsedTime;
+import com.qualcomm.robotcore.util.RobotLog;
 
 import org.firstinspires.ftc.teamcode.Robot;
 import org.firstinspires.ftc.teamcode.RobotConstants;
 import org.firstinspires.ftc.teamcode.logging.CsvLog;
+import org.firstinspires.ftc.teamcode.subsystems.aiming.Alliance;
 
 /**
- * The match autonomous: starts with 4 balls, shifts over slightly to the shooting spot, shoots for a fixed time,
- * then drives to the parking square and turns so the intake faces the field for TeleOp. One sequential Ivy
- * command; each drive leg finishes only once the robot is at its target pose (see Drivetrain's followPathCommand()
- * and holdPoseCommand()), and the Ivy scheduler runs the sequence from loop().
+ * The match autonomous: starts with 4 balls and shoots them from the starting pose, then pulls away from the wall
+ * and strafes into the parking square. The heading never changes (90 deg on red, 270 deg on blue). One sequential Ivy
+ * command; each drive leg finishes only once the robot is at its target pose (see Drivetrain's
+ * followPathCommand()), and the Ivy scheduler runs the sequence from loop().
  * Every loop is written to a CSV log on the Robot Controller (see CsvLog) so a run can be analyzed afterward.
+ * Not listed on the Driver Station itself: RedMatchAuto and BlueMatchAuto choose the alliance. The routine is
+ * written once with red coordinates, and blue runs it rotated 180 deg about the field center. Run Match TeleOp
+ * right after; it picks up this auto's final pose and alliance.
  */
-@Autonomous(name = "Match Auto")
-public class MatchAuto extends OpMode {
+public abstract class MatchAuto extends OpMode {
     private Robot robot;
 
-    // One row per loop, written to /sdcard/FIRST/logs/ on the Robot Controller
+    // One row per loop, written to /sdcard/logs/ on the Robot Controller
     private CsvLog matchLog;
     // Time since START, for the log's time column; and the time of the previous loop, for measuring loop length
     private final ElapsedTime timeSinceStart = new ElapsedTime();
@@ -48,14 +51,33 @@ public class MatchAuto extends OpMode {
     // Creates poses from (x, y, heading) with the heading given in degrees
     private final PoseFactory poseFactory = PoseFactory.degrees();
 
-    // Pedro coordinates, inches. Heading 90 deg = front of the robot faces +y (toward the wall behind the start),
-    // so the shooter (out the back) faces -y toward the HIVE. The robot keeps 90 deg for every drive leg and only
-    // turns at the very end. The start heading must match how the robot is really placed: telling the localizer
-    // 270 here (an earlier version) mirrors every move, so the robot slid right and backed into the wall.
-    private final Pose startPose = poseFactory.of(62.22, 132.56, 90);
-    private final Pose shootingPose = poseFactory.of(60, 132.56, 90);           // slide over in x only (2.22 in)
-    private final Pose leaveShootingPose = poseFactory.of(57.87, 107.03, 90);   // drive away from the wall in y only
-    private final Pose parkedTurnedPose = poseFactory.of(15, 120, 180);         // park, turning 90 deg counterclockwise on the way
+    // Pedro coordinates, inches. On red, heading 90 deg = front of the robot faces +y (toward the wall behind the
+    // start), so the shooter (out the back) faces -y toward the red upper cell. The heading never changes.
+    // The start heading must match how the robot is really placed: telling the localizer the opposite heading
+    // turns every move around, so the robot slid the wrong way and backed into the wall.
+    // These are the RED side's poses. Blue uses the same ones rotated 180 deg about the field center
+    // (see Alliance.fromRedSide()): blue starts at the bottom of the field facing 270 deg, and every move is turned
+    // around to match. Only red's are written down; init() picks this alliance's version.
+    private final Pose redStartPose = poseFactory.of(58.664, 133.403, 90);      // also where the robot shoots from
+    private final Pose redLeaveWallPose = poseFactory.of(59.207, 115.477, 90);  // pull away from the wall (about 18 in)
+    private final Pose redParkingPose = poseFactory.of(12.7, 117.92, 90);       // strafe into the parking square
+
+    // How many times init_loop() had to set the start pose again because the odometry didn't read it, shown on
+    // telemetry (and logged) to tell whether the Pinpoint is losing the start pose
+    private int startPoseResets = 0;
+
+    // This alliance's versions of the poses above, set in init()
+    private Pose startPose;
+    private Pose leaveWallPose;
+    private Pose parkingPose;
+
+    /**
+     * Which alliance this auto runs for. Picking the red or blue auto is how the robot knows its side: the auto
+     * saves it (Robot.saveAlliance()) and the TeleOp that follows aims at that alliance's hive.
+     *
+     * @return the alliance
+     */
+    protected abstract Alliance alliance();
 
     /**
      * Builds a straight path whose heading turns evenly from pathStartPose's heading to pathEndPose's heading
@@ -88,7 +110,7 @@ public class MatchAuto extends OpMode {
      * Builds the shooting step: spins the flywheel up to RobotConstants.AUTO_SHOOTER_TARGET_RPM, waits for it to
      * reach speed (within RobotConstants.INDEXER_START_FEED_RPM_TOLERANCE, the same check TeleOp uses), shoots for
      * RobotConstants.AUTO_SHOOT_SECONDS, then stops the shooter. The indexer feeds by itself whenever the wheel is
-     * at speed, so no ball is fed into a slow wheel. The drivetrain keeps holding the shooting pose throughout.
+     * at speed, so no ball is fed into a slow wheel. The drivetrain is stopped throughout.
      *
      * @return a command that finishes once shooting is done and the shooter is stopped
      */
@@ -117,11 +139,15 @@ public class MatchAuto extends OpMode {
     public void init() {
         // The Ivy scheduler is static and outlives OpModes, so clear anything a previous OpMode left behind
         Scheduler.reset();
+        startPose = alliance().fromRedSide(redStartPose);
+        leaveWallPose = alliance().fromRedSide(redLeaveWallPose);
+        parkingPose = alliance().fromRedSide(redParkingPose);
         robot = new Robot(hardwareMap);
+        Robot.saveAlliance(alliance()); // the TeleOp that follows aims at this alliance's hive
         robot.drivetrain.setPose(startPose);
         robot.update(); // apply the starting pose before the OpMode starts
 
-        matchLog = new CsvLog("MatchAuto",
+        matchLog = new CsvLog("MatchAuto" + alliance().label,
                 "timeSec", "loopMs", "step",
                 "x", "y", "headingDeg",
                 "targetX", "targetY", "targetHeadingDeg",
@@ -129,7 +155,36 @@ public class MatchAuto extends OpMode {
                 "followerMode", "followerBusy", "pathProgress",
                 "pathPointX", "pathPointY", "pathPointHeadingDeg",
                 "shooterRpm", "shooterTargetRpm", "shooterAtSpeed",
+                "indexerFeeding", "indexerAngleDeg", "indexerOffRestDeg",
                 "pedroDebug");
+    }
+
+    /**
+     * Runs repeatedly between INIT and START. Keeps the odometry updating and makes sure it reads the starting pose:
+     * creating the robot recalibrates the Pinpoint's gyro, which takes about a quarter second, and a start pose set
+     * while that's still running can be lost. So if the odometry doesn't read the start pose, it's set again (the
+     * robot is sitting at the start spot during INIT). If it still won't take, the Driver Station says so.
+     */
+    @Override
+    public void init_loop() {
+        robot.update();
+        if (!robot.drivetrain.isAtPose(startPose)) {
+            robot.drivetrain.setPose(startPose);
+            startPoseResets++;
+        }
+        Pose robotPose = robot.drivetrain.getPose();
+        if (robot.drivetrain.isAtPose(startPose)) {
+            telemetry.addData("Odometry", "OK: reads the %s start pose", alliance().label);
+        } else {
+            telemetry.addData("ODOMETRY ERROR", "Doesn't read the start pose even after setting it again. Check the "
+                    + "Pinpoint and pod cables, then power-cycle the robot. Don't run the auto like this.");
+        }
+        telemetry.addData("Start pose set again (times)", startPoseResets);
+        telemetry.addData("Start pose (x, y, heading)", "%.1f, %.1f, %.0f",
+                startPose.x(), startPose.y(), Math.toDegrees(startPose.heading()));
+        telemetry.addData("Odometry (x, y, heading)", "%.1f, %.1f, %.0f",
+                robotPose.x(), robotPose.y(), Math.toDegrees(robotPose.heading()));
+        telemetry.update();
     }
 
     /**
@@ -137,15 +192,20 @@ public class MatchAuto extends OpMode {
      */
     @Override
     public void start() {
+        // Set the start pose once more: by now the Pinpoint's gyro recalibration from INIT has long finished, so
+        // this one can't be lost, and the robot is still sitting at the start spot
+        robot.drivetrain.setPose(startPose);
+        RobotLog.ii("MatchAuto", "Start pose had to be set again %d times during INIT", startPoseResets);
         matchRoutine = sequential(
-                markStep("slideToShoot", shootingPose),
-                robot.drivetrain.followPathCommand(straightPath(startPose, shootingPose)),
-                markStep("shoot", null),
+                markStep("shoot", startPose),
+                // Sit still while shooting: the robot was placed at the start pose, so there's nothing to correct,
+                // and holding the pose would drive the robot off if the odometry were wrong
+                instant(() -> robot.drivetrain.stop()),
                 shootAllBallsCommand(),
-                markStep("leaveWall", leaveShootingPose),
-                robot.drivetrain.followPathCommand(straightPath(shootingPose, leaveShootingPose)),
-                markStep("park", parkedTurnedPose),
-                robot.drivetrain.followPathCommand(straightPath(leaveShootingPose, parkedTurnedPose)),
+                markStep("leaveWall", leaveWallPose),
+                robot.drivetrain.followPathCommand(straightPath(startPose, leaveWallPose)),
+                markStep("park", parkingPose),
+                robot.drivetrain.followPathCommand(straightPath(leaveWallPose, parkingPose)),
                 markStep("done", null)
         );
         Scheduler.schedule(matchRoutine);
@@ -171,6 +231,8 @@ public class MatchAuto extends OpMode {
         telemetry.addData("Shooter RPM", robot.shooter.getShooterRpm());
         telemetry.addData("Shooter target RPM", robot.shooter.getTargetRpm());
         telemetry.addData("Shooter at speed", robot.shooter.isAtSpeed());
+        telemetry.addData("Indexer", robot.shooter.isIndexerFeeding() ? "FEEDING" : "resting");
+        telemetry.addData("Indexer off rest (deg)", "%.1f", robot.shooter.getIndexerErrorToRestDegrees());
         telemetry.addData("Step", currentStepName);
         telemetry.addData("Log file", matchLog.getFilePath());
         if (matchLog.getErrorMessage() != null) {
@@ -210,6 +272,8 @@ public class MatchAuto extends OpMode {
                 closestPathPose == null ? "" : closestPathPose.y(),
                 closestPathPose == null ? "" : Math.toDegrees(closestPathPose.heading()),
                 robot.shooter.getShooterRpm(), robot.shooter.getTargetRpm(), robot.shooter.isAtSpeed(),
+                robot.shooter.isIndexerFeeding(), robot.shooter.getIndexerAngleDegrees(),
+                robot.shooter.getIndexerErrorToRestDegrees(),
                 robot.drivetrain.getFollowerDebugText());
     }
 
