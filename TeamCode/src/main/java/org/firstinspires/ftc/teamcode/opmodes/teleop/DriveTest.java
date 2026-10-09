@@ -8,8 +8,8 @@ import org.firstinspires.ftc.teamcode.subsystems.aiming.Alliance;
 
 /**
  * The practice TeleOp: the same as the match TeleOp, but starting from the corner the shot measurements were
- * taken from and aiming at the blue hive (the measured cell is the blue lower one, on B). It always starts from
- * that corner, never from a carried-over pose.
+ * taken from and aiming at the blue hive (the measured cell is the blue lower one, aimed at with the right trigger
+ * from the lower half). It always starts from that corner, never from a carried-over pose.
  * Its coordinates are the practice frame: (0, 0) is the robot in the practice corner (Pedro (8.5, 8.5)), which is
  * what telemetry shows. The hive cells are shifted into that frame, so aiming is unchanged. The reset button (Back)
  * resets the whole pose to (0, 0, 0 deg) here, not just the heading.

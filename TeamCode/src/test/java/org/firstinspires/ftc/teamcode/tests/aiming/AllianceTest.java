@@ -56,7 +56,7 @@ public class AllianceTest {
     /**
      * From each auto's starting spot (where it shoots at a fixed RPM), aiming at the cell that auto shoots into
      * gives exactly the heading the robot starts at, from the distance the shot table expects (~48 in), straight in
-     * front of the cell. Ties the auto's start heading, the cell positions, and the X/B aim math together: if any of
+     * front of the cell. Ties the auto's start heading, the cell positions, and the aim math together: if any of
      * them pointed the wrong way, this would fail.
      */
     @Test

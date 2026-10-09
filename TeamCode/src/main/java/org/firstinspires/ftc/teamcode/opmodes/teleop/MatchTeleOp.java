@@ -9,12 +9,11 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
 import org.firstinspires.ftc.teamcode.logging.CsvLog;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.Alliance;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolution;
-import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotTarget;
 import org.firstinspires.ftc.teamcode.subsystems.drivetrain.Drivetrain;
 
 /**
  * The match TeleOp: field-centric driving with Pedro Pathing, the intake, manual shooting, and aim-and-shoot at
- * the alliance's two HIVE cells (AIM_LEFT_CELL_BUTTON / AIM_RIGHT_CELL_BUTTON, see Robot.applyDriverControls()).
+ * the alliance's HIVE cell on the robot's half of the field (AIM_AND_SHOOT_BUTTON, see Robot.applyDriverControls()).
  * Not listed on the Driver Station itself: thin wrappers (AutoAllianceMatchTeleOp, listed as "Match TeleOp", and
  * DriveTest) only choose the alliance and the fallback starting pose.
  *
@@ -127,24 +126,20 @@ public abstract class MatchTeleOp extends OpMode {
             }
         } else {
             allianceText = "UNKNOWN";
-            warningText = "No auto has run since the robot was restarted, so the alliance is unknown and "
-                    + "X/B aiming is off. Run Match Auto Red or Match Auto Blue first.";
+            warningText = "No auto has run since the robot was restarted, so the alliance is unknown and the "
+                    + "right trigger (aim and shoot) is off. A (manual shot) still works. "
+                    + "Run Match Auto Red or Match Auto Blue first.";
         }
 
         robot = new Robot(hardwareMap);
         robot.setResetButtonResetsPosition(resetButtonResetsPosition());
-        boolean driverOnBlueSide = driverSideFollowsAlliance() && alliance == Alliance.BLUE;
-        robot.setDriverOnBlueSide(driverOnBlueSide);
+        robot.setDriverOnBlueSide(driverSideFollowsAlliance() && alliance == Alliance.BLUE);
         if (alliance != null) {
-            // The alliance's left/right cells are as seen from its own driver station. A driver on the other side
-            // (e.g. DriveTest aiming at blue from the red side) sees them the other way around, so swap them
-            boolean driverOnOtherAllianceSide = (alliance == Alliance.BLUE) != driverOnBlueSide;
-            ShotTarget leftCell = driverOnOtherAllianceSide ? alliance.rightCell : alliance.leftCell;
-            ShotTarget rightCell = driverOnOtherAllianceSide ? alliance.leftCell : alliance.rightCell;
-            // Move the cells into this TeleOp's coordinates (no change for Pedro coordinates)
+            // Both cells go to the robot, which aims at whichever is on its half of the field. Move them into this
+            // TeleOp's coordinates (no change for Pedro coordinates)
             double offsetInches = coordinateOffsetInches();
-            robot.setShotTargets(leftCell.shifted(-offsetInches, -offsetInches),
-                    rightCell.shifted(-offsetInches, -offsetInches));
+            robot.setShotTargets(alliance.leftCell.shifted(-offsetInches, -offsetInches),
+                    alliance.rightCell.shifted(-offsetInches, -offsetInches));
         }
         if (startPose != null) {
             robot.drivetrain.setPose(startPose);
@@ -153,7 +148,7 @@ public abstract class MatchTeleOp extends OpMode {
 
         teleOpLog = new CsvLog(getClass().getSimpleName(),
                 "timeSec", "loopMs", "alliance",
-                "xHeld", "bHeld", "rightTriggerHeld", "leftTriggerHeld", "mode",
+                "aimHeld", "manualShotHeld", "intakeHeld", "mode",
                 "x", "y", "headingDeg", "turnRateDegPerSec",
                 "cell", "shotHeadingDeg", "headingErrorDeg", "aimTurnPower",
                 "shotValidity", "shotDistanceIn", "angleOffCenterDeg",
@@ -203,40 +198,45 @@ public abstract class MatchTeleOp extends OpMode {
     }
 
     /**
-     * Runs repeatedly after START. Applies the driver controls, updates the robot, then reports the robot
-     * pose, shooter, and (while aiming) shot numbers to telemetry.
+     * Runs repeatedly after START. Applies the driver controls, updates the robot, then reports to telemetry:
+     * the shot position (IN RANGE / TOO FAR / ...) first, then the aimed shot's numbers while aiming, then the
+     * robot's state and pose.
      */
     @Override
     public void loop() {
         robot.applyDriverControls(gamepad1);
         robot.update();
 
-        addStartInfoToTelemetry();
-        Pose robotPose = robot.drivetrain.getPose(); // position from the Pinpoint; inches for x/y, radians for heading
-        telemetry.addData("Robot X (in)", robotPose.x());
-        telemetry.addData("Robot Y (in)", robotPose.y());
-        telemetry.addData("Robot Heading (deg)", Math.toDegrees(robotPose.heading())); // radians -> degrees for reading
-        telemetry.addData("Heading Locked", robot.drivetrain.isHeadingLocked());
-        telemetry.addData("Robot State", robot.getSuperState().label);
-        telemetry.addData("Manual Shot RPM", "%.0f", robot.getManualShotRpm());
-        telemetry.addData("Indexer", robot.shooter.isIndexerFeeding() ? "FEEDING" : "resting");
-        telemetry.addData("Indexer Angle (deg)", "%.1f", robot.shooter.getIndexerAngleDegrees());
-        telemetry.addData("Indexer Off Rest (deg)", "%.1f", robot.shooter.getIndexerErrorToRestDegrees());
-        telemetry.addData("Indexer Encoder (V)", "%.3f", robot.shooter.getIndexerEncoderVoltage());
+        if (warningText != null) {
+            telemetry.addData("WARNING", warningText);
+        }
 
-        ShotSolution shotSolution = robot.getShotSolution(); // null unless an aim button is held
+        // At the top, always: whether a shot from here would be in range, even before the aim trigger is pulled
+        ShotSolution shotFromHere = robot.getShotSolutionFromHere(); // null if the alliance (so the cells) is unknown
+        telemetry.addData("Shot Position",
+                shotFromHere != null ? shotFromHere.validity.label : "UNKNOWN (no alliance)");
+
+        ShotSolution shotSolution = robot.getShotSolution(); // null unless the aim trigger is held
         if (shotSolution != null) {
-            telemetry.addData("Shot Cell", robot.getShotTarget().name);
             telemetry.addData("Shot READY", robot.isReadyToShoot());
-            telemetry.addData("Shot Position", shotSolution.validity.label);
+            telemetry.addData("Shot Cell", robot.getShotTarget().name);
             telemetry.addData("Shot Distance (in)", "%.1f", shotSolution.distanceInches);
             telemetry.addData("Shot Angle Off Center (deg)", "%.1f", shotSolution.angleOffCenterDegrees);
-            telemetry.addData("Shot Target Heading (deg)", "%.1f", Math.toDegrees(shotSolution.targetHeadingRadians));
             telemetry.addData("Shot Heading Error (deg)", "%.1f", robot.getAimHeadingErrorDeg());
-            telemetry.addData("Shot Target RPM", "%.0f", shotSolution.targetRpm);
-            telemetry.addData("Shot Actual RPM", "%.0f", robot.shooter.getShooterRpm());
+            telemetry.addData("Shot RPM (target / actual)", "%.0f / %.0f",
+                    shotSolution.targetRpm, robot.shooter.getShooterRpm());
+        } else if (RobotConstants.SHOOT_BUTTON.test(gamepad1)) {
+            // Manual shot held: the flywheel numbers, for tuning its PID
+            telemetry.addData("Manual RPM (target / actual)", "%.0f / %.0f",
+                    robot.shooter.getTargetRpm(), robot.shooter.getShooterRpm());
+            telemetry.addData("Shooter At Speed", robot.shooter.isAtSpeed());
         }
-        telemetry.addData("Log file", teleOpLog.getFilePath());
+
+        telemetry.addData("Robot State", robot.getSuperState().label);
+        telemetry.addData("Alliance", allianceText);
+        Pose robotPose = robot.drivetrain.getPose(); // position from the Pinpoint; inches for x/y, radians for heading
+        telemetry.addData("Robot (x, y, heading)", "%.1f, %.1f, %.0f",
+                robotPose.x(), robotPose.y(), Math.toDegrees(robotPose.heading())); // heading radians -> degrees
         if (teleOpLog.getErrorMessage() != null) {
             telemetry.addData("Log error", teleOpLog.getErrorMessage());
         }
@@ -268,11 +268,11 @@ public abstract class MatchTeleOp extends OpMode {
         double loopMilliseconds = (nowSeconds - previousLoopSeconds) * 1000.0;
         previousLoopSeconds = nowSeconds;
 
-        boolean rightTriggerHeld = RobotConstants.SHOOT_BUTTON.test(gamepad1);
+        boolean manualShotHeld = RobotConstants.SHOOT_BUTTON.test(gamepad1);
         String mode;
         if (shotSolution != null) {
             mode = "aim";
-        } else if (rightTriggerHeld) {
+        } else if (manualShotHeld) {
             mode = "manualShot";
         } else {
             mode = "drive";
@@ -280,8 +280,8 @@ public abstract class MatchTeleOp extends OpMode {
 
         teleOpLog.addRow(
                 nowSeconds, loopMilliseconds, allianceText,
-                RobotConstants.AIM_LEFT_CELL_BUTTON.test(gamepad1), RobotConstants.AIM_RIGHT_CELL_BUTTON.test(gamepad1),
-                rightTriggerHeld, RobotConstants.INTAKE_BUTTON.test(gamepad1), mode,
+                RobotConstants.AIM_AND_SHOOT_BUTTON.test(gamepad1),
+                manualShotHeld, RobotConstants.INTAKE_BUTTON.test(gamepad1), mode,
                 robotPose.x(), robotPose.y(), Math.toDegrees(robotPose.heading()),
                 Math.toDegrees(robot.drivetrain.getVelocity().omega),
                 shotSolution == null ? "" : robot.getShotTarget().name,

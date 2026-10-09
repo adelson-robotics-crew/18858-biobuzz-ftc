@@ -53,7 +53,7 @@ public final class RobotConstants {
     // Manual shot: spins the flywheel at the fixed SHOOTER_TARGET_RPM (not the shot table, so it still works if the
     // robot's position is off) and the indexer feeds automatically whenever the wheel is up to speed. The driver
     // drives to the usual spot and shoots from there.
-    public static final Predicate<Gamepad> SHOOT_BUTTON = gamepad -> gamepad.right_trigger > TRIGGER_PRESSED_THRESHOLD;
+    public static final Predicate<Gamepad> SHOOT_BUTTON = gamepad -> gamepad.a;
 
     // Shooter RPM tuning on the fly. Each press (not hold) bumps the shooter target RPM by SHOOTER_RPM_ADJUST_STEP.
     // Off for matches, so a bumper pressed by accident can't change the shooting speed. Turn on to tune RPM.
@@ -65,10 +65,10 @@ public final class RobotConstants {
     // the shooter spins at the shot table's RPM for the current distance, and the indexer feeds only while the
     // position is valid (distance and angle), the heading is within HEADING_TOLERANCE_DEG, and the wheel is at speed.
     // The turn stick is ignored while held. Release to go back to normal driving; the shooter stops.
-    // Left and right are as the driver sees them; which cell each one is depends on the alliance (see the TeleOp).
-    // If both are held, left wins.
-    public static final Predicate<Gamepad> AIM_LEFT_CELL_BUTTON = gamepad -> gamepad.x;
-    public static final Predicate<Gamepad> AIM_RIGHT_CELL_BUTTON = gamepad -> gamepad.b;
+    // One button for both cells: on press it picks the alliance's cell on the robot's half of the field (the robot's
+    // y vs. the field's horizontal center line) and keeps that cell until released (see Robot.chooseShotTarget()).
+    public static final Predicate<Gamepad> AIM_AND_SHOOT_BUTTON =
+            gamepad -> gamepad.right_trigger > TRIGGER_PRESSED_THRESHOLD;
 
     // Emergency heading reset (one press): with the robot facing straight away from the driver (the way the
     // forward stick drives), sets the heading to 0 deg from the red side or 180 deg from the blue side. In Match TeleOp x and y are left alone; it's only for when the
@@ -208,7 +208,7 @@ public final class RobotConstants {
     // so a wheel that never settles can't keep the robot from parking.
     public static final double AUTO_SPIN_UP_TIMEOUT_SECONDS = 3.0;
 
-    // Shot aiming (AIM_LEFT_CELL_BUTTON / AIM_RIGHT_CELL_BUTTON), in Pedro field coordinates.
+    // Shot aiming (AIM_AND_SHOOT_BUTTON), in Pedro field coordinates.
 
     // THE MEASURED CELL: the BLUE hive's LOWER-RIGHT cell, as seen in the Pedro Pathing visualizer. Every shot
     // measurement and the shot table below were taken against this one cell. The other three cells are derived from
@@ -244,7 +244,7 @@ public final class RobotConstants {
     // Every measured scoring shot was within 5 deg of the computed heading.
     public static final double HEADING_TOLERANCE_DEG = 3.0;
 
-    // Aiming turn controller (X/B held): turn power = HEADING_KP * error - HEADING_KD * turn rate, plus HEADING_KS
+    // Aiming turn controller (right trigger held): turn power = HEADING_KP * error - HEADING_KD * turn rate, plus HEADING_KS
     // in the direction of the error while the error is bigger than HEADING_KS_DEADBAND_DEG, clamped to [-1, 1].
     // P alone (the old controller) asked for too little power near the target to overcome friction, so the robot
     // stalled a few degrees short of HEADING_TOLERANCE_DEG and never fed. Tune on the robot with the TeleOp log:

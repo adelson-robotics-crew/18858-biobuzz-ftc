@@ -8,7 +8,8 @@ import org.firstinspires.ftc.teamcode.subsystems.aiming.Alliance;
 /**
  * The TeleOp to run after the autonomous in a match: starts from where the auto left the robot and aims at the
  * hive of the auto that ran (Match Auto Red or Match Auto Blue). If no auto has run since the robot was restarted,
- * it can't tell the alliance, so X/B aiming stays off; run Match Auto Red or Match Auto Blue first.
+ * it can't tell the alliance, so the right trigger (aim and shoot) stays off; run Match Auto Red or Match Auto Blue
+ * first.
  */
 @TeleOp(name = "Match TeleOp")
 public class AutoAllianceMatchTeleOp extends MatchTeleOp {

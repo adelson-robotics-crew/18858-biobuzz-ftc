@@ -95,13 +95,14 @@ public class Robot {
     // aimed shot, which sets the shooter to the shot table's RPM, can't change what the next manual shot uses
     private double manualShotRpm = RobotConstants.SHOOTER_TARGET_RPM;
 
-    // The HIVE cells the aim buttons shoot into, as the driver sees them; set by the TeleOp for its alliance
-    // (see setShotTargets()). Null until set, and an aim button with no cell does nothing
-    private ShotTarget leftShotTarget = null;
-    private ShotTarget rightShotTarget = null;
+    // The alliance's two HIVE cells, which AIM_AND_SHOOT_BUTTON picks between; set by the TeleOp for its alliance
+    // (see setShotTargets()). Null until set, and the aim button does nothing without them
+    private ShotTarget firstShotTarget = null;
+    private ShotTarget secondShotTarget = null;
 
-    // The cell being aimed at and the shot worked out from the robot's pose this loop, while an aim button is
-    // held; both null while neither is
+    // The cell being aimed at and the shot worked out from the robot's pose this loop, while the aim button is
+    // held; both null while it isn't. The cell is picked once per press, so it doesn't switch mid-shot if the robot
+    // drifts across the center line
     private ShotTarget currentShotTarget = null;
     private ShotSolution currentShotSolution = null;
 
@@ -136,15 +137,31 @@ public class Robot {
     }
 
     /**
-     * Sets which HIVE cells AIM_LEFT_CELL_BUTTON and AIM_RIGHT_CELL_BUTTON shoot into. The TeleOp calls this once
-     * in init() with its alliance's cells.
+     * Sets the two HIVE cells AIM_AND_SHOOT_BUTTON picks between. The TeleOp calls this once in init() with its
+     * alliance's cells; their order doesn't matter.
      *
-     * @param leftCell  the cell on the driver's left
-     * @param rightCell the cell on the driver's right
+     * @param firstCell  one of the alliance's cells
+     * @param secondCell the alliance's other cell
      */
-    public void setShotTargets(ShotTarget leftCell, ShotTarget rightCell) {
-        leftShotTarget = leftCell;
-        rightShotTarget = rightCell;
+    public void setShotTargets(ShotTarget firstCell, ShotTarget secondCell) {
+        firstShotTarget = firstCell;
+        secondShotTarget = secondCell;
+    }
+
+    /**
+     * Picks the cell on the robot's half of the field: the one whose y is nearer the robot's y. The two cells
+     * mirror each other over the field's horizontal center line, so this is the same as asking whether the robot is
+     * above or below that line, and it still works in a TeleOp whose coordinates are shifted (cells shift too).
+     * Red below the line gets its right (lower) cell and above it its left (upper) cell; for blue, below gets the
+     * left (lower) cell and above the right (upper) one.
+     *
+     * @return the cell to aim at from where the robot is now
+     */
+    private ShotTarget chooseShotTarget() {
+        double robotYInches = drivetrain.getPose().y();
+        double distanceToFirstCell = Math.abs(robotYInches - firstShotTarget.yInches);
+        double distanceToSecondCell = Math.abs(robotYInches - secondShotTarget.yInches);
+        return distanceToFirstCell <= distanceToSecondCell ? firstShotTarget : secondShotTarget;
     }
 
     /**
@@ -190,11 +207,12 @@ public class Robot {
      * commands to the subsystems. Call once per TeleOp loop, before update().
      * Shooting, in priority order:
      *   1. SHOOT_BUTTON held: manual shot. The driver turns with the turn stick and the wheel spins at the fixed
-     *      manual RPM; X/B are ignored while it's held.
-     *   2. AIM_LEFT_CELL_BUTTON or AIM_RIGHT_CELL_BUTTON held: the robot aims and shoots at that cell (see
-     *      applyAimAndShoot()): it turns itself to the shot heading and the wheel follows the shot table.
+     *      manual RPM; the right trigger is ignored while it's held.
+     *   2. AIM_AND_SHOOT_BUTTON held: the robot aims and shoots at the alliance cell on its half of the field (see
+     *      chooseShotTarget() and applyAimAndShoot()): it turns itself to the shot heading and the wheel follows
+     *      the shot table.
      *   3. Neither: normal driving, shooter off.
-     * Nothing latches: as soon as SHOOT_BUTTON is released, holding X or B aims again.
+     * Nothing latches: as soon as SHOOT_BUTTON is released, holding the right trigger aims again.
      *
      * @param driverGamepad the gamepad that drives the robot (gamepad1 in the OpMode)
      */
@@ -249,17 +267,13 @@ public class Robot {
 
         boolean manualShootHeld = RobotConstants.SHOOT_BUTTON.test(driverGamepad);
 
-        // Aim and shoot, unless the manual shot button overrides it. Left is checked first, so if both aim buttons
-        // are held, the left cell wins
-        if (!manualShootHeld) {
-            if (RobotConstants.AIM_LEFT_CELL_BUTTON.test(driverGamepad) && leftShotTarget != null) {
-                applyAimAndShoot(leftShotTarget, forward, strafe);
-                return;
-            }
-            if (RobotConstants.AIM_RIGHT_CELL_BUTTON.test(driverGamepad) && rightShotTarget != null) {
-                applyAimAndShoot(rightShotTarget, forward, strafe);
-                return;
-            }
+        // Aim and shoot, unless the manual shot button overrides it
+        boolean aimHeld = RobotConstants.AIM_AND_SHOOT_BUTTON.test(driverGamepad);
+        if (!manualShootHeld && aimHeld && firstShotTarget != null && secondShotTarget != null) {
+            // Pick the cell when aiming starts and keep it for the rest of the press
+            ShotTarget target = currentShotTarget != null ? currentShotTarget : chooseShotTarget();
+            applyAimAndShoot(target, forward, strafe);
+            return;
         }
 
         // Manual shot or plain driving: the driver turns, and the wheel uses the fixed manual RPM
@@ -323,6 +337,23 @@ public class Robot {
      */
     public ShotSolution getShotSolution() {
         return currentShotSolution;
+    }
+
+    /**
+     * The shot as it stands from where the robot is now, whether or not aim-and-shoot is held: the shot being taken
+     * while aiming, otherwise the shot at the cell the aim button would pick from here. Lets the driver see "IN
+     * RANGE" / "TOO FAR" etc. before pulling the trigger. Doesn't move anything.
+     *
+     * @return the shot solution, or null if the TeleOp hasn't set the alliance's cells
+     */
+    public ShotSolution getShotSolutionFromHere() {
+        if (currentShotSolution != null) {
+            return currentShotSolution;
+        }
+        if (firstShotTarget == null || secondShotTarget == null) {
+            return null;
+        }
+        return ShotSolver.solve(drivetrain.getPose(), chooseShotTarget());
     }
 
     /**
