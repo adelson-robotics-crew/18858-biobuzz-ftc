@@ -12,7 +12,7 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
  * The same table and limits work for every cell, because the cells are symmetric copies of the measured one.
  */
 public final class ShotSolver {
-    private static final ShotTable SHOT_TABLE = ShotTable.fromRobotConstants();
+    private static final ShotTable SHOT_TABLE = ShotTable.fromTunedRows();
 
     /**
      * Not meant to be instantiated; use the static solve() methods.

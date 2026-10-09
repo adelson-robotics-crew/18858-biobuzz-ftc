@@ -1,9 +1,9 @@
-package org.firstinspires.ftc.teamcode.subsystems.aiming;
+package org.firstinspires.ftc.teamcode;
 
 import com.pedropathing.math.Pose;
 import com.pedropathing.utils.Angle;
 
-import org.firstinspires.ftc.teamcode.RobotConstants;
+import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotTarget;
 
 /**
  * Which alliance the robot is on, and the two HIVE cells that alliance shoots into, as that alliance's driver sees

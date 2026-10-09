@@ -7,7 +7,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.teamcode.Robot;
 import org.firstinspires.ftc.teamcode.RobotConstants;
 import org.firstinspires.ftc.teamcode.logging.CsvLog;
-import org.firstinspires.ftc.teamcode.subsystems.aiming.Alliance;
+import org.firstinspires.ftc.teamcode.Alliance;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolution;
 import org.firstinspires.ftc.teamcode.subsystems.drivetrain.Drivetrain;
 
@@ -116,7 +116,7 @@ public abstract class MatchTeleOp extends OpMode {
         Alliance alliance = fixedAlliance();
         if (alliance == null && savedAlliance != null) {
             alliance = savedAlliance;
-            allianceText = alliance.label + " (from Match Auto " + alliance.label + ")";
+            allianceText = alliance.label + " (from the " + alliance.label + " Match Auto)";
         } else if (alliance != null) {
             allianceText = alliance.label;
             // A fixed alliance that disagrees with the auto that just ran is probably the wrong TeleOp
@@ -128,7 +128,7 @@ public abstract class MatchTeleOp extends OpMode {
             allianceText = "UNKNOWN";
             warningText = "No auto has run since the robot was restarted, so the alliance is unknown and the "
                     + "right trigger (aim and shoot) is off. A (manual shot) still works. "
-                    + "Run Match Auto Red or Match Auto Blue first.";
+                    + "Run a red or blue Match Auto first.";
         }
 
         robot = new Robot(hardwareMap);
@@ -153,7 +153,7 @@ public abstract class MatchTeleOp extends OpMode {
                 "cell", "shotHeadingDeg", "headingErrorDeg", "aimTurnPower",
                 "shotValidity", "shotDistanceIn", "angleOffCenterDeg",
                 "shooterTargetRpm", "shooterRpm", "shooterAtSpeed", "readyToShoot", "robotState",
-                "indexerFeeding", "indexerAngleDeg", "indexerOffRestDeg", "indexerEncoderVolts");
+                "indexerState", "indexerAngleDeg", "indexerOffRestDeg", "indexerEncoderVolts");
 
         addStartInfoToTelemetry();
         telemetry.update();
@@ -293,8 +293,8 @@ public abstract class MatchTeleOp extends OpMode {
                 shotSolution == null ? "" : shotSolution.angleOffCenterDegrees,
                 robot.shooter.getTargetRpm(), robot.shooter.getShooterRpm(), robot.shooter.isAtSpeed(),
                 robot.isReadyToShoot(), robot.getSuperState().label,
-                robot.shooter.isIndexerFeeding(), robot.shooter.getIndexerAngleDegrees(),
-                robot.shooter.getIndexerErrorToRestDegrees(), robot.shooter.getIndexerEncoderVoltage());
+                robot.indexer.getState().name(), robot.indexer.getAngleDegrees(),
+                robot.indexer.getErrorToRestDegrees(), robot.indexer.getEncoderVoltage());
     }
 
     /**

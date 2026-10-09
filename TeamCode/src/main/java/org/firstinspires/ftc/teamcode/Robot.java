@@ -4,22 +4,37 @@ import com.pedropathing.math.Pose;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
-import org.firstinspires.ftc.teamcode.subsystems.aiming.Alliance;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolution;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolver;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotTarget;
-import org.firstinspires.ftc.teamcode.subsystems.Intake;
-import org.firstinspires.ftc.teamcode.subsystems.Shooter;
 import org.firstinspires.ftc.teamcode.subsystems.drivetrain.Drivetrain;
+import org.firstinspires.ftc.teamcode.subsystems.indexer.Indexer;
+import org.firstinspires.ftc.teamcode.subsystems.intake.Intake;
+import org.firstinspires.ftc.teamcode.subsystems.shooter.Shooter;
 
 /**
  * Owns every subsystem and is the single place hardware gets initialized. It also holds the logic
  * that ties the subsystems together: reading the gamepad through the mapping in RobotConstants,
- * and deciding which mechanisms may run together (the intake and shooter never do).
+ * deciding which mechanisms may run together (the intake and shooter never do), and when the indexer
+ * feeds (only once the shooter's wheel is at speed; see update()). Subsystems never call each other.
  * OpModes create one Robot in init() and talk to the subsystems through it;
  * they never touch hardware objects directly.
  */
 public class Robot {
+
+    // =====================================================================================
+    // CONSTANTS (only this class uses these; shared ones stay in RobotConstants)
+    // =====================================================================================
+    // Stick values with a magnitude at or below this are treated as 0.
+    // 0.0 means no deadband, which is how the TeleOp behaved before this constant existed.
+    private static final double STICK_DEADBAND = 0.0;
+
+    // How much one press of SHOOTER_RPM_UP_BUTTON / SHOOTER_RPM_DOWN_BUTTON changes the target RPM.
+    private static final double SHOOTER_RPM_ADJUST_STEP = 50.0;
+
+    // The indexer only feeds once the robot's heading is within this many degrees of the shooting heading.
+    // Every measured scoring shot was within 5 deg of the computed heading.
+    private static final double HEADING_TOLERANCE_DEG = 3.0;
 
     /**
      * The robot's overall state. Each constant explicitly says what every subsystem's state
@@ -75,6 +90,13 @@ public class Robot {
     public final Drivetrain drivetrain;
     public final Intake intake;
     public final Shooter shooter;
+    public final Indexer indexer;
+
+    // Whether the indexer may feed once the shooter's wheel is at speed (see update()). Set every loop by whatever
+    // is shooting: while aiming, only once the position is valid and the robot is aimed; otherwise true
+    private boolean feedAllowed = true;
+    // Whether the shooter was running last loop, so update() can tell the loop it starts (to correct the indexer)
+    private boolean shooterWasActive = false;
 
     // Whether each shooter-RPM button was held last loop, so a hold counts as one press instead of one per loop
     private boolean shooterRpmUpWasPressed = false;
@@ -115,6 +137,7 @@ public class Robot {
         drivetrain = new Drivetrain(hardwareMap);
         intake = new Intake(hardwareMap);
         shooter = new Shooter(hardwareMap);
+        indexer = new Indexer(hardwareMap);
     }
 
     /**
@@ -199,7 +222,35 @@ public class Robot {
     public void update() {
         drivetrain.update();
         intake.update();
-        shooter.update(); // the indexer holds its rest angle by itself whenever it isn't feeding
+        shooter.update(); // also updates whether the wheel is at speed, which the indexer decision below reads
+
+        // Feed only while the shooter is running with its wheel at speed and feeding is allowed, so no ball is
+        // fed into a slow (or overshooting) wheel. Otherwise stop feeding: the indexer's PID corrects it back to
+        // rest for a short window, then it cuts power until the next shot
+        boolean shooterJustStarted = shooter.isActive() && !shooterWasActive;
+        shooterWasActive = shooter.isActive();
+        if (shooter.isActive() && shooter.isAtSpeed() && feedAllowed) {
+            indexer.requestFeeding();
+        } else {
+            indexer.stopFeeding();
+            if (shooterJustStarted) {
+                // A shot (A or the aim trigger) just started and the wheel is still spinning up: correct the indexer
+                // back to rest now, since it may have been knocked off while unpowered, before it starts feeding
+                indexer.prepareForShot();
+            }
+        }
+        indexer.update();
+    }
+
+    /**
+     * Sets whether the indexer may feed. Even when allowed, it only feeds while the shooter runs with its wheel at
+     * speed (see update()). Whatever is shooting sets this every loop: aim-and-shoot only once the position is
+     * valid and the robot is aimed, a manual or fixed-RPM shot always.
+     *
+     * @param allowed true to let the indexer feed once the wheel is at speed; false to hold balls back
+     */
+    public void setFeedAllowed(boolean allowed) {
+        feedAllowed = allowed;
     }
 
     /**
@@ -234,13 +285,13 @@ public class Robot {
         if (RobotConstants.SHOOTER_RPM_ADJUST_ENABLED) {
             boolean shooterRpmUpPressed = RobotConstants.SHOOTER_RPM_UP_BUTTON.test(driverGamepad);
             if (shooterRpmUpPressed && !shooterRpmUpWasPressed) {
-                adjustManualShotRpm(RobotConstants.SHOOTER_RPM_ADJUST_STEP);
+                adjustManualShotRpm(SHOOTER_RPM_ADJUST_STEP);
             }
             shooterRpmUpWasPressed = shooterRpmUpPressed;
 
             boolean shooterRpmDownPressed = RobotConstants.SHOOTER_RPM_DOWN_BUTTON.test(driverGamepad);
             if (shooterRpmDownPressed && !shooterRpmDownWasPressed) {
-                adjustManualShotRpm(-RobotConstants.SHOOTER_RPM_ADJUST_STEP);
+                adjustManualShotRpm(-SHOOTER_RPM_ADJUST_STEP);
             }
             shooterRpmDownWasPressed = shooterRpmDownPressed;
         }
@@ -280,7 +331,7 @@ public class Robot {
         currentShotTarget = null;
         currentShotSolution = null;
         drivetrain.driveFieldCentric(forward, strafe, turn);
-        shooter.setFeedAllowed(true); // manual shooting feeds whenever the wheel is at speed
+        setFeedAllowed(true); // manual shooting feeds whenever the wheel is at speed
         // Manual shots always use the fixed manual RPM, never the shot table: an aimed shot may have left the
         // shooter at the table's RPM, so set it back every loop
         shooter.setTargetRpm(manualShotRpm);
@@ -289,6 +340,28 @@ public class Robot {
         } else {
             stopShoot();
         }
+    }
+
+    /**
+     * One loop of aim-and-shoot without a driver, for an autonomous: the same as holding AIM_AND_SHOOT_BUTTON with
+     * the sticks centered. Picks the alliance cell on the robot's half of the field on the first call and keeps it
+     * until stopAimAndShoot(). Call every loop while shooting; does nothing until setShotTargets() has been called.
+     */
+    public void aimAndShootInPlace() {
+        if (firstShotTarget == null || secondShotTarget == null) {
+            return;
+        }
+        ShotTarget target = currentShotTarget != null ? currentShotTarget : chooseShotTarget();
+        applyAimAndShoot(target, 0.0, 0.0); // no translation: turn in place
+    }
+
+    /**
+     * Ends an aimAndShootInPlace() run: stops the shooter and forgets the cell, so the next aim picks one again.
+     */
+    public void stopAimAndShoot() {
+        currentShotTarget = null;
+        currentShotSolution = null;
+        stopShoot();
     }
 
     /**
@@ -306,7 +379,7 @@ public class Robot {
         currentShotSolution = ShotSolver.solve(drivetrain.getPose(), target);
         drivetrain.driveFieldCentricWithHeading(forward, strafe, currentShotSolution.targetHeadingRadians);
         shooter.setTargetRpm(currentShotSolution.targetRpm);
-        shooter.setFeedAllowed(currentShotSolution.inRange && isAimed());
+        setFeedAllowed(currentShotSolution.inRange && isAimed());
         requestShoot(); // still rejected while the intake runs
     }
 
@@ -378,13 +451,13 @@ public class Robot {
     }
 
     /**
-     * Tells whether the robot is facing the shooting heading, within RobotConstants.HEADING_TOLERANCE_DEG.
+     * Tells whether the robot is facing the shooting heading, within HEADING_TOLERANCE_DEG.
      *
      * @return true while aiming and within the heading tolerance
      */
     public boolean isAimed() {
         return currentShotSolution != null
-                && Math.abs(getAimHeadingErrorDeg()) <= RobotConstants.HEADING_TOLERANCE_DEG;
+                && Math.abs(getAimHeadingErrorDeg()) <= HEADING_TOLERANCE_DEG;
     }
 
     /**
@@ -463,6 +536,6 @@ public class Robot {
      * @return 0 if the value is within the deadband, otherwise the value unchanged
      */
     private double applyDeadband(double stickValue) {
-        return Math.abs(stickValue) <= RobotConstants.STICK_DEADBAND ? 0.0 : stickValue;
+        return Math.abs(stickValue) <= STICK_DEADBAND ? 0.0 : stickValue;
     }
 }

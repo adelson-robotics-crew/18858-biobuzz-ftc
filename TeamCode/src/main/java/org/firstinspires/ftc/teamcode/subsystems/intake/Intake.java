@@ -1,16 +1,29 @@
-package org.firstinspires.ftc.teamcode.subsystems;
+package org.firstinspires.ftc.teamcode.subsystems.intake;
 
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
-import org.firstinspires.ftc.teamcode.RobotConstants;
 
 /**
  * The intake: two continuous-rotation servos (one on each side) pulling balls in, and a DC motor.
  * Only Robot decides when this may run (see Robot.requestIntake()); this class doesn't know Shooter exists.
  */
 public class Intake {
+    // =====================================================================================
+    // CONSTANTS (only this class uses these; shared ones stay in RobotConstants)
+    // =====================================================================================
+    // Hardware names: must match the Robot Controller's hardware configuration.
+    private static final String RIGHT_INTAKE_SERVO_NAME = "intake_right"; // continuous-rotation servo
+    private static final String LEFT_INTAKE_SERVO_NAME = "intake_left";   // continuous-rotation servo
+    private static final String INTAKE_MOTOR_NAME = "intake";             // DC motor
+
+    // The two intake servos face opposite ways, so pulling a ball in needs opposite signs.
+    // If a servo pushes the ball out instead of in, flip that servo's sign.
+    private static final double INTAKE_RIGHT_SERVO_POWER = -1.0;
+    private static final double INTAKE_LEFT_SERVO_POWER = 1.0;
+    private static final double INTAKE_MOTOR_POWER = 1.0;
+
     public enum State {
         IDLE,
         INTAKING,
@@ -29,9 +42,9 @@ public class Intake {
      * @param hardwareMap the hardware map from the running OpMode
      */
     public Intake(HardwareMap hardwareMap) {
-        rightServo = hardwareMap.get(CRServo.class, RobotConstants.RIGHT_INTAKE_SERVO_NAME);
-        leftServo = hardwareMap.get(CRServo.class, RobotConstants.LEFT_INTAKE_SERVO_NAME);
-        intakeMotor = hardwareMap.get(DcMotor.class, RobotConstants.INTAKE_MOTOR_NAME);
+        rightServo = hardwareMap.get(CRServo.class, RIGHT_INTAKE_SERVO_NAME);
+        leftServo = hardwareMap.get(CRServo.class, LEFT_INTAKE_SERVO_NAME);
+        intakeMotor = hardwareMap.get(DcMotor.class, INTAKE_MOTOR_NAME);
     }
 
     /**
@@ -45,15 +58,15 @@ public class Intake {
                 intakeMotor.setPower(0.0);
                 break;
             case INTAKING:
-                rightServo.setPower(RobotConstants.INTAKE_RIGHT_SERVO_POWER);
-                leftServo.setPower(RobotConstants.INTAKE_LEFT_SERVO_POWER);
-                intakeMotor.setPower(RobotConstants.INTAKE_MOTOR_POWER);
+                rightServo.setPower(INTAKE_RIGHT_SERVO_POWER);
+                leftServo.setPower(INTAKE_LEFT_SERVO_POWER);
+                intakeMotor.setPower(INTAKE_MOTOR_POWER);
                 break;
             case OUTTAKING:
                 // The intake powers negated: everything spins the opposite way, pushing balls back out
-                rightServo.setPower(-RobotConstants.INTAKE_RIGHT_SERVO_POWER);
-                leftServo.setPower(-RobotConstants.INTAKE_LEFT_SERVO_POWER);
-                intakeMotor.setPower(-RobotConstants.INTAKE_MOTOR_POWER);
+                rightServo.setPower(-INTAKE_RIGHT_SERVO_POWER);
+                leftServo.setPower(-INTAKE_LEFT_SERVO_POWER);
+                intakeMotor.setPower(-INTAKE_MOTOR_POWER);
                 break;
         }
     }

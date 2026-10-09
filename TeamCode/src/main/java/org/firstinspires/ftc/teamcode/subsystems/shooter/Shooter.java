@@ -1,7 +1,5 @@
-package org.firstinspires.ftc.teamcode.subsystems;
+package org.firstinspires.ftc.teamcode.subsystems.shooter;
 
-import com.qualcomm.robotcore.hardware.AnalogInput;
-import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.HardwareMap;
@@ -10,62 +8,88 @@ import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import org.firstinspires.ftc.teamcode.RobotConstants;
 
 /**
- * The shooter: a DC motor that spins the shooting wheel, plus the indexer that feeds balls into it: an Axon servo
- * in continuous mode, whose feedback wire (an analog input) reports its angle within one turn. Only Robot decides when the shooter may run (see Robot.requestShoot()).
- * While shooting, the wheel is held at a fixed RPM with closed-loop velocity control, so its speed
- * doesn't drop as the battery drains. The indexer is not requested separately: it feeds automatically
- * while the wheel is being driven (SHOOTING), the wheel is at speed, and Robot allows feeding (setFeedAllowed()).
- * "At speed" has hysteresis: the wheel must get within RobotConstants.INDEXER_START_FEED_RPM_TOLERANCE of the
- * target to count, and stops counting once it's more than RobotConstants.INDEXER_STOP_FEED_RPM_TOLERANCE away.
+ * The shooter: a DC motor that spins the shooting wheel. Only Robot decides when it may run (see
+ * Robot.requestShoot()), and when the indexer feeds balls into it (see Robot.update(), which reads isAtSpeed()).
+ * While shooting, the wheel is held at the target RPM with closed-loop velocity control, so its speed
+ * doesn't drop as the battery drains.
+ * "At speed" has hysteresis: the wheel must get within INDEXER_START_FEED_RPM_TOLERANCE of the
+ * target to count, and stops counting once it's more than INDEXER_STOP_FEED_RPM_TOLERANCE away.
  * So a ball is never fed into a wheel that is too slow (still spinning up, coasting down) or too fast
  * (overshooting after a spin-up or a target change), and the indexer doesn't flicker when a ball briefly drags
- * the wheel down. Whenever the indexer isn't feeding, it turns to the nearest rest angle and holds there, so balls
- * can't feed through (see IndexerRest). Rest angles are every RobotConstants.INDEXER_REST_SPACING_DEG from where the
- * indexer was at INIT.
+ * the wheel down.
  * The target RPM starts at RobotConstants.SHOOTER_TARGET_RPM and can be adjusted at runtime with adjustTargetRpm()
  * (so the right shooting speed can be found on the field) or set outright with setTargetRpm().
  */
 public class Shooter {
+    // =====================================================================================
+    // CONSTANTS (only this class uses these; shared ones stay in RobotConstants)
+    // =====================================================================================
+    // Hardware names: must match the Robot Controller's hardware configuration.
+    private static final String SHOOTER_MOTOR_NAME = "shooter";           // DC motor
+
+    // Indexer feed hysteresis. While shooting, the wheel counts as "at speed" once it gets within
+    // INDEXER_START_FEED_RPM_TOLERANCE of the target RPM (above or below), and keeps counting as at speed until it
+    // drifts more than INDEXER_STOP_FEED_RPM_TOLERANCE away. The gap keeps the indexer from flickering on and off
+    // when the wheel sags a little as a ball goes through. The indexer feeds only while the wheel is at speed.
+    // The hub reports velocity in steps of 20 ticks/s, which with 28 ticks/rev is 42.9 RPM per step, so the speed
+    // only ever reads in 43 RPM jumps (2357, 2400, 2443...). The tolerances are one and two of those steps: a single
+    // measurement step no longer pauses feeding (25 / 50 did, 90 times in the 10-09 TeleOp log), while a real ball
+    // dip (100-190 RPM in that log) still does.
+    private static final double INDEXER_START_FEED_RPM_TOLERANCE = 45.0;
+    private static final double INDEXER_STOP_FEED_RPM_TOLERANCE = 90.0;
+
+    // Velocity PIDF gains the motor controller uses to hold the shooter wheel at the target RPM (setVelocity()).
+    // While SHOOTER_USE_CUSTOM_VELOCITY_PIDF is false, the controller keeps its default gains and these four
+    // numbers are ignored. The values below are the REV hub firmware's defaults (the goBILDA motor type in the
+    // SDK doesn't set its own), so turning the flag on with them unchanged behaves the same as leaving it off.
+    // Units are the hub's own (error in encoder ticks per second), not RPM.
+    // Overshoot/oscillation: lower P, raise D, and also check I (it keeps pushing until the error is gone, which
+    // adds overshoot on a heavy wheel). F is a feedforward: power applied in proportion to the target speed.
+    private static final boolean SHOOTER_USE_CUSTOM_VELOCITY_PIDF = true;
+
+    private static final double SHOOTER_VELOCITY_F = 13.0;
+    private static final double SHOOTER_VELOCITY_P = 300.0;
+    private static final double SHOOTER_VELOCITY_I = 0.00;
+    private static final double SHOOTER_VELOCITY_D = 0.0;
+
+    // Encoder ticks per one revolution of the shooter motor's output shaft.
+    // The shooter is a goBILDA 5203 Yellow Jacket 6000 RPM (5203-2402-0001, 1:1, no gearbox), so the encoder's
+    // 28 ticks per turn of the motor shaft are also 28 ticks per turn of the output shaft.
+    private static final double SHOOTER_ENCODER_TICKS_PER_REV = 28.0;
+
     public enum State {
         IDLE,
         SHOOTING
     }
 
     private final DcMotorEx shooterMotor; // DcMotorEx (not DcMotor) so the encoder velocity can be read and set
-    private final CRServo indexerServo;
-    private final AnalogInput indexerEncoder; // the Axon's position feedback: 0 V to max voltage = one full turn
-    private final double indexerZeroAngleDegrees; // the encoder's angle at INIT; rest angles are measured from here
-    private State state = State.IDLE; // flywheel state
+    private State state = State.IDLE;
     private double peakShooterRpm = 0.0; // highest RPM magnitude seen since init, for finding the motor's max speed
-    private double targetRpm = RobotConstants.SHOOTER_TARGET_RPM; // wheel speed held while shooting; adjustable at runtime
-    private boolean indexerFeeding = false; // whether the indexer fed this loop (otherwise it was holding rest)
-    private boolean feedAllowed = true; // whether Robot allows the indexer to feed (e.g. only once aimed); set every loop
+    private double targetRpm = RobotConstants.SHOOTER_TARGET_RPM; // wheel speed held while shooting
     private boolean wheelAtSpeed = false; // the hysteresis latch: true once within the start tolerance, until past the stop tolerance
+
     /**
      * Gets the shooter hardware from the hardware map.
      *
      * @param hardwareMap the hardware map from the running OpMode
      */
     public Shooter(HardwareMap hardwareMap) {
-        shooterMotor = hardwareMap.get(DcMotorEx.class, RobotConstants.SHOOTER_MOTOR_NAME);
-        indexerServo = hardwareMap.get(CRServo.class, RobotConstants.INDEXER_SERVO_NAME);
-        indexerEncoder = hardwareMap.get(AnalogInput.class, RobotConstants.INDEXER_ENCODER_NAME);
-        // Wherever the indexer is at INIT is 0 deg, so it should be placed in a rest position before INIT
-        indexerZeroAngleDegrees = readIndexerEncoderDegrees();
+        shooterMotor = hardwareMap.get(DcMotorEx.class, SHOOTER_MOTOR_NAME);
         // Lets the motor controller use the encoder to hold the speed passed to setVelocity()
         shooterMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        if (RobotConstants.SHOOTER_USE_CUSTOM_VELOCITY_PIDF) {
+        if (SHOOTER_USE_CUSTOM_VELOCITY_PIDF) {
             // Replaces the controller's default velocity gains for RUN_USING_ENCODER (the mode setVelocity() uses)
             shooterMotor.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(
-                    RobotConstants.SHOOTER_VELOCITY_P,
-                    RobotConstants.SHOOTER_VELOCITY_I,
-                    RobotConstants.SHOOTER_VELOCITY_D,
-                    RobotConstants.SHOOTER_VELOCITY_F));
+                    SHOOTER_VELOCITY_P,
+                    SHOOTER_VELOCITY_I,
+                    SHOOTER_VELOCITY_D,
+                    SHOOTER_VELOCITY_F));
         }
     }
 
     /**
-     * Applies power (or target velocity) for the current state. Call once per loop.
+     * Applies power (or target velocity) for the current state, then updates whether the wheel is at speed.
+     * Call once per loop.
      */
     public void update() {
         peakShooterRpm = Math.max(peakShooterRpm, Math.abs(getShooterRpm()));
@@ -85,67 +109,10 @@ public class Shooter {
         if (state != State.SHOOTING) {
             wheelAtSpeed = false;
         } else if (wheelAtSpeed) {
-            wheelAtSpeed = rpmError <= RobotConstants.INDEXER_STOP_FEED_RPM_TOLERANCE;
+            wheelAtSpeed = rpmError <= INDEXER_STOP_FEED_RPM_TOLERANCE;
         } else {
-            wheelAtSpeed = rpmError <= RobotConstants.INDEXER_START_FEED_RPM_TOLERANCE;
+            wheelAtSpeed = rpmError <= INDEXER_START_FEED_RPM_TOLERANCE;
         }
-
-        // Feed while the wheel is at speed and Robot allows it; otherwise turn to the nearest rest angle and hold it
-        indexerFeeding = wheelAtSpeed && feedAllowed;
-        if (indexerFeeding) {
-            indexerServo.setPower(RobotConstants.INDEXER_SERVO_POWER);
-        } else {
-            indexerServo.setPower(IndexerRest.powerToRest(getIndexerErrorToRestDegrees()));
-        }
-    }
-
-    /**
-     * Reads the indexer's raw angle from the Axon's feedback voltage.
-     *
-     * @return the encoder angle, from 0 to 360 deg
-     */
-    private double readIndexerEncoderDegrees() {
-        // The feedback voltage sweeps from 0 to the hub's max analog voltage over one turn
-        return indexerEncoder.getVoltage() / indexerEncoder.getMaxVoltage()
-                * RobotConstants.INDEXER_ENCODER_DEGREES_PER_TURN;
-    }
-
-    /**
-     * The raw voltage on the indexer's feedback wire, for checking the wiring: it should sweep from about 0 V up to
-     * the hub's max analog voltage (about 3.3 V) as the indexer turns once. Stuck near 0 V means no signal.
-     *
-     * @return the feedback voltage, in volts
-     */
-    public double getIndexerEncoderVoltage() {
-        return indexerEncoder.getVoltage();
-    }
-
-    /**
-     * The indexer's angle from where it was at INIT, in the direction positive servo power turns it.
-     *
-     * @return the angle, in [0, 360) deg
-     */
-    public double getIndexerAngleDegrees() {
-        return IndexerRest.angleFromStartDegrees(readIndexerEncoderDegrees(), indexerZeroAngleDegrees,
-                RobotConstants.INDEXER_ENCODER_DIRECTION);
-    }
-
-    /**
-     * How far the indexer is from the nearest rest angle.
-     *
-     * @return the turn to the nearest rest angle, in degrees (positive = the positive-power way)
-     */
-    public double getIndexerErrorToRestDegrees() {
-        return IndexerRest.errorToNearestRestDegrees(getIndexerAngleDegrees(), RobotConstants.INDEXER_REST_SPACING_DEG);
-    }
-
-    /**
-     * Tells whether the indexer fed balls this loop, as of the last update().
-     *
-     * @return true while feeding; false while it's holding (or turning back to) a rest angle
-     */
-    public boolean isIndexerFeeding() {
-        return indexerFeeding;
     }
 
     /**
@@ -155,7 +122,7 @@ public class Shooter {
      */
     public double getShooterRpm() {
         // getVelocity() is in encoder ticks per second; * 60 gives ticks per minute, / ticks-per-rev gives RPM
-        return shooterMotor.getVelocity() * 60.0 / RobotConstants.SHOOTER_ENCODER_TICKS_PER_REV;
+        return shooterMotor.getVelocity() * 60.0 / SHOOTER_ENCODER_TICKS_PER_REV;
     }
 
     /**
@@ -174,8 +141,7 @@ public class Shooter {
      * @param rpmChange how much to add to the target RPM; negative to lower it
      */
     public void adjustTargetRpm(double rpmChange) {
-        targetRpm = Math.max(RobotConstants.SHOOTER_MIN_TARGET_RPM,
-                Math.min(RobotConstants.SHOOTER_MAX_TARGET_RPM, targetRpm + rpmChange));
+        setTargetRpm(targetRpm + rpmChange);
     }
 
     /**
@@ -187,16 +153,6 @@ public class Shooter {
     public void setTargetRpm(double newTargetRpm) {
         targetRpm = Math.max(RobotConstants.SHOOTER_MIN_TARGET_RPM,
                 Math.min(RobotConstants.SHOOTER_MAX_TARGET_RPM, newTargetRpm));
-    }
-
-    /**
-     * Sets whether the indexer may feed. Even when allowed, it only feeds while shooting with the wheel at speed.
-     * Robot sets this every loop: while aiming, only once the robot is in a valid position and aimed; otherwise true.
-     *
-     * @param allowed true to let the indexer feed once the wheel is at speed; false to hold balls back
-     */
-    public void setFeedAllowed(boolean allowed) {
-        feedAllowed = allowed;
     }
 
     /**
@@ -216,7 +172,7 @@ public class Shooter {
      */
     private double rpmToTicksPerSecond(double rpm) {
         // * ticks-per-rev gives ticks per minute, / 60 gives ticks per second
-        return rpm * RobotConstants.SHOOTER_ENCODER_TICKS_PER_REV / 60.0;
+        return rpm * SHOOTER_ENCODER_TICKS_PER_REV / 60.0;
     }
 
     /**
@@ -247,7 +203,7 @@ public class Shooter {
     }
 
     /**
-     * Requests the idle (stopped) state for the flywheel. The indexer stops with it.
+     * Requests the idle (stopped) state.
      */
     public void requestIdle() {
         state = State.IDLE;

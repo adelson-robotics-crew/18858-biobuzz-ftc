@@ -4,7 +4,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-import org.firstinspires.ftc.teamcode.RobotConstants;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotTable;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotTarget;
 import org.junit.Test;
@@ -14,16 +13,16 @@ import org.junit.Test;
  */
 public class ShotTableTest {
     private static final double RPM_EPSILON = 1e-9;
-    private final ShotTable shotTable = ShotTable.fromRobotConstants();
+    private final ShotTable shotTable = ShotTable.fromTunedRows();
 
     /**
      * Each row's distance gives exactly that row's RPM.
      */
     @Test
     public void exactValueAtEachRow() {
-        for (int rowIndex = 0; rowIndex < RobotConstants.SHOT_TABLE_DISTANCES_INCHES.length; rowIndex++) {
-            assertEquals(RobotConstants.SHOT_TABLE_RPMS[rowIndex],
-                    shotTable.rpmAt(RobotConstants.SHOT_TABLE_DISTANCES_INCHES[rowIndex]), RPM_EPSILON);
+        for (int rowIndex = 0; rowIndex < ShotTable.SHOT_TABLE_DISTANCES_INCHES.length; rowIndex++) {
+            assertEquals(ShotTable.SHOT_TABLE_RPMS[rowIndex],
+                    shotTable.rpmAt(ShotTable.SHOT_TABLE_DISTANCES_INCHES[rowIndex]), RPM_EPSILON);
         }
     }
 

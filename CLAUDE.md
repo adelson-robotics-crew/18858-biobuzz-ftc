@@ -8,7 +8,7 @@
 
 - Each subsystem class owns its own hardware. Nothing outside it touches those objects directly. A subsystem can also have its own internal state if it needs one.
 - `Robot.java` owns all subsystems, is the single hardware init point, and holds the logic that ties them together (including gamepad handling and which mechanisms may run together).
-- `RobotConstants.java` is definitions only, with no logic. It has clearly labeled sections for hardware names, gamepad button mapping, and tunable robot constants. Pedro's own tuned values stay in `subsystems/drivetrain/pedro/Constants.java`.
+- `RobotConstants.java` is definitions only, with no logic, and holds only constants that more than one class reads: the whole gamepad button mapping (kept together so every control is remapped in one place) and the shared tunables. A constant used by a single class (hardware names, gains, tolerances) lives in a labeled CONSTANTS block at the top of that class. Pedro's own tuned values stay in `subsystems/drivetrain/pedro/Constants.java`.
 
 # Command-based (Ivy)
 

@@ -1,11 +1,11 @@
-package org.firstinspires.ftc.teamcode.tests.aiming;
+package org.firstinspires.ftc.teamcode.tests;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
 
 import com.pedropathing.math.Pose;
 
-import org.firstinspires.ftc.teamcode.subsystems.aiming.Alliance;
+import org.firstinspires.ftc.teamcode.Alliance;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolution;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolver;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotTarget;

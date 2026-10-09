@@ -4,7 +4,7 @@ import com.pedropathing.api.PoseFactory;
 import com.pedropathing.math.Pose;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
-import org.firstinspires.ftc.teamcode.subsystems.aiming.Alliance;
+import org.firstinspires.ftc.teamcode.Alliance;
 
 /**
  * The practice TeleOp: the same as the match TeleOp, but starting from the corner the shot measurements were

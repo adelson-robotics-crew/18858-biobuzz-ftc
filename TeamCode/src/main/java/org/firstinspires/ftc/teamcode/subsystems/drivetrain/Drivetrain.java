@@ -27,6 +27,54 @@ import org.firstinspires.ftc.teamcode.subsystems.drivetrain.pedro.Constants;
  * Those commands also stop the drivetrain and finish if the robot stalls (e.g. drives into a wall), see StallDetector.
  */
 public class Drivetrain {
+    // =====================================================================================
+    // CONSTANTS (only this class uses these; shared ones stay in RobotConstants)
+    // =====================================================================================
+    // A drive command (follow a path, hold a pose) counts as finished once the robot is within
+    // these distances of its target pose, in both position and heading. The same tolerances are used at INIT to
+    // check that the odometry really took the starting pose (see Drivetrain.isAtPose()).
+    private static final double DRIVE_POSITION_TOLERANCE_INCHES = 1.0;
+    private static final double DRIVE_HEADING_TOLERANCE_DEGREES = 3.0;
+
+    // Stall detection (every drive command, e.g. autonomous legs). If the robot hasn't moved
+    // more than DRIVE_STALL_MOVEMENT_INCHES or turned more than DRIVE_STALL_TURN_DEGREES for DRIVE_STALL_SECONDS
+    // while a command is driving it, it's assumed to be pushing into a wall: the drivetrain stops and the command
+    // counts as finished, as if the robot had reached its target.
+    private static final double DRIVE_STALL_SECONDS = 1.0;
+    private static final double DRIVE_STALL_MOVEMENT_INCHES = 0.5;
+    private static final double DRIVE_STALL_TURN_DEGREES = 2.0;
+
+    // Heading lock (TeleOp). While the turn stick is at or below HEADING_LOCK_TURN_THRESHOLD, the robot holds
+    // its heading instead of drifting; pushing the stick past it turns the lock off so the driver turns freely.
+    // Set HEADING_LOCK_ENABLED to false to drive exactly as before the lock existed.
+    private static final boolean HEADING_LOCK_ENABLED = false;
+    // Turn stick magnitude (0 to 1) at or below which the stick counts as released and the lock engages
+    private static final double HEADING_LOCK_TURN_THRESHOLD = 0.05;
+    // After the turn stick is released, the lock waits until the robot is rotating slower than this before it
+    // grabs the heading to hold. Grabbing it right away would pull the robot back against its own turning momentum.
+    private static final double HEADING_LOCK_SETTLE_DEGREES_PER_SECOND = 20.0;
+    // PD gains of the heading lock: turn power per radian of heading error, and turn power per rad/s of rotation
+    // (the D term damps the correction so it doesn't overshoot). Raise P if the robot gets knocked off its
+    // heading too easily; raise D if it wobbles back and forth around the locked heading.
+    private static final double HEADING_LOCK_P = 0.2;
+    private static final double HEADING_LOCK_D = 0.05;
+
+    // Aiming turn controller (right trigger held): turn power = HEADING_KP * error - HEADING_KD * turn rate, plus HEADING_KS
+    // in the direction of the error while the error is bigger than HEADING_KS_DEADBAND_DEG, clamped to [-1, 1].
+    // P alone (the old controller) asked for too little power near the target to overcome friction, so the robot
+    // stalled a few degrees short of HEADING_TOLERANCE_DEG and never fed. Tune on the robot with the TeleOp log:
+    //   stops short of the target -> raise HEADING_KS;  wobbles back and forth -> raise HEADING_KD or lower HEADING_KP;
+    //   turns too slowly from far away -> raise HEADING_KP.
+    // Turn power per radian of heading error
+    private static final double HEADING_KP = 1.2;
+    // Turn power per radian/second of turning, subtracted to brake the turn as it nears the target
+    private static final double HEADING_KD = 0.06;
+    // Minimum turn power that overcomes friction, added in the direction of the error
+    private static final double HEADING_KS = 0.07;
+    // Below this much error, HEADING_KS is left off so the robot doesn't jitter around the target. Must be smaller
+    // than HEADING_TOLERANCE_DEG so the robot still gets inside the tolerance.
+    private static final double HEADING_KS_DEADBAND_DEG = 1.0;
+
     // The robot's pose as of the last update() in any OpMode. Static so it survives from one OpMode to the next
     // (e.g. autonomous into TeleOp) while the app keeps running; a power cycle or app restart clears it.
     // Read it with getSavedPose()
@@ -36,7 +84,7 @@ public class Drivetrain {
 
     // Turns heading error into turn power for the TeleOp heading lock (no I term: the D term uses the measured rotation speed)
     private final PIDController headingLockController =
-            new PIDController(RobotConstants.HEADING_LOCK_P, 0.0, RobotConstants.HEADING_LOCK_D);
+            new PIDController(HEADING_LOCK_P, 0.0, HEADING_LOCK_D);
     // The heading (radians) the lock is holding, or null while unlocked (driver turning, or robot still settling)
     private Double lockedHeadingRadians = null;
 
@@ -73,7 +121,7 @@ public class Drivetrain {
 
     /**
      * Drives with field-centric controls: "forward" is away from the driver no matter which way the robot faces.
-     * With the heading lock on (see RobotConstants), a turn input at or below HEADING_LOCK_TURN_THRESHOLD
+     * With the heading lock on (HEADING_LOCK_ENABLED), a turn input at or below HEADING_LOCK_TURN_THRESHOLD
      * makes the robot hold its heading; a larger turn input releases the lock and turns the robot as asked.
      *
      * @param forward the requested forward power, from -1 to 1
@@ -87,8 +135,8 @@ public class Drivetrain {
             releaseHeadingLock();
         }
 
-        boolean driverIsTurning = Math.abs(turn) > RobotConstants.HEADING_LOCK_TURN_THRESHOLD;
-        if (!RobotConstants.HEADING_LOCK_ENABLED || driverIsTurning) {
+        boolean driverIsTurning = Math.abs(turn) > HEADING_LOCK_TURN_THRESHOLD;
+        if (!HEADING_LOCK_ENABLED || driverIsTurning) {
             releaseHeadingLock();
             follower.manual(ManualDrive.fieldCentric(
                     forward,
@@ -104,7 +152,7 @@ public class Drivetrain {
 
         if (lockedHeadingRadians == null) {
             double rotationSpeedDegreesPerSecond = Math.abs(Math.toDegrees(follower.velocity().omega));
-            if (rotationSpeedDegreesPerSecond >= RobotConstants.HEADING_LOCK_SETTLE_DEGREES_PER_SECOND) {
+            if (rotationSpeedDegreesPerSecond >= HEADING_LOCK_SETTLE_DEGREES_PER_SECOND) {
                 // Still coasting from the last turn; let it slow down before picking the heading to hold
                 follower.manual(translationOnlyPowers);
                 return;
@@ -137,7 +185,8 @@ public class Drivetrain {
     /**
      * The turn power that turns the robot toward a target heading while aiming: proportional to the heading error,
      * braked by how fast the robot is already turning, plus a minimum push to overcome friction (see the HEADING_*
-     * constants in RobotConstants). Positive turn power turns counterclockwise, which is the way the heading grows.
+     * constants at the top of this class). Positive turn power turns counterclockwise, which is the way the heading
+     * grows.
      *
      * @param currentHeadingRadians the robot's heading now
      * @param targetHeadingRadians  the heading to turn to
@@ -148,10 +197,10 @@ public class Drivetrain {
         // counterclockwise of the robot, the same sign Pedro's own heading lock uses
         double headingErrorRadians = Angle.error(currentHeadingRadians, targetHeadingRadians);
         double turnRateRadiansPerSecond = follower.velocity().omega; // positive while turning counterclockwise
-        double turnPower = RobotConstants.HEADING_KP * headingErrorRadians
-                - RobotConstants.HEADING_KD * turnRateRadiansPerSecond;
-        if (Math.abs(Math.toDegrees(headingErrorRadians)) > RobotConstants.HEADING_KS_DEADBAND_DEG) {
-            turnPower += Math.signum(headingErrorRadians) * RobotConstants.HEADING_KS;
+        double turnPower = HEADING_KP * headingErrorRadians
+                - HEADING_KD * turnRateRadiansPerSecond;
+        if (Math.abs(Math.toDegrees(headingErrorRadians)) > HEADING_KS_DEADBAND_DEG) {
+            turnPower += Math.signum(headingErrorRadians) * HEADING_KS;
         }
         return Math.max(-1.0, Math.min(1.0, turnPower));
     }
@@ -280,7 +329,7 @@ public class Drivetrain {
 
     /**
      * Tells whether the robot is close enough to a pose, in both position and heading, using the
-     * drive tolerances in RobotConstants. Checking position alone is what let an earlier autonomous
+     * drive tolerances at the top of this class. Checking position alone is what let an earlier autonomous
      * start its next leg before a turn was done, so drive commands finish on this instead.
      *
      * @param targetPose the pose the robot should be at
@@ -291,8 +340,8 @@ public class Drivetrain {
         double positionErrorInches = currentPose.distance(targetPose);
         // Angle.error wraps the difference into [-180, 180) deg (as radians), so 359 deg vs 1 deg reads as 2 deg
         double headingErrorDegrees = Math.toDegrees(Angle.error(currentPose.heading(), targetPose.heading()));
-        return positionErrorInches < RobotConstants.DRIVE_POSITION_TOLERANCE_INCHES
-                && Math.abs(headingErrorDegrees) < RobotConstants.DRIVE_HEADING_TOLERANCE_DEGREES;
+        return positionErrorInches < DRIVE_POSITION_TOLERANCE_INCHES
+                && Math.abs(headingErrorDegrees) < DRIVE_HEADING_TOLERANCE_DEGREES;
     }
 
     /**
@@ -367,7 +416,7 @@ public class Drivetrain {
 
     /**
      * Detects a stalled robot: one that's being driven but hasn't moved or turned more than the
-     * RobotConstants.DRIVE_STALL_* thresholds for RobotConstants.DRIVE_STALL_SECONDS. Movement is measured
+     * DRIVE_STALL_* thresholds for DRIVE_STALL_SECONDS. Movement is measured
      * from a reference pose, which moves up to the robot's pose (restarting the clock) whenever the robot gets
      * past either threshold, so slow but steady progress never counts as a stall.
      */
@@ -389,7 +438,7 @@ public class Drivetrain {
          * Checks for a stall. Call once per loop while driving.
          *
          * @param currentPose the robot's pose now
-         * @return true once the robot has gone RobotConstants.DRIVE_STALL_SECONDS without moving or turning past the thresholds
+         * @return true once the robot has gone DRIVE_STALL_SECONDS without moving or turning past the thresholds
          */
         boolean isStalled(Pose currentPose) {
             if (referencePose == null) {
@@ -399,12 +448,12 @@ public class Drivetrain {
             double movedInches = currentPose.distance(referencePose);
             // Angle.error wraps the difference so turning across 0/360 deg reads as a small turn
             double turnedDegrees = Math.abs(Math.toDegrees(Angle.error(currentPose.heading(), referencePose.heading())));
-            if (movedInches > RobotConstants.DRIVE_STALL_MOVEMENT_INCHES
-                    || turnedDegrees > RobotConstants.DRIVE_STALL_TURN_DEGREES) {
+            if (movedInches > DRIVE_STALL_MOVEMENT_INCHES
+                    || turnedDegrees > DRIVE_STALL_TURN_DEGREES) {
                 reset(currentPose); // still making progress
                 return false;
             }
-            return timeSinceLastMovement.seconds() > RobotConstants.DRIVE_STALL_SECONDS;
+            return timeSinceLastMovement.seconds() > DRIVE_STALL_SECONDS;
         }
     }
 

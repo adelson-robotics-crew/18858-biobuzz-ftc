@@ -7,7 +7,7 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
  * Distances below the first row or above the last row get that end row's RPM; the table never extrapolates.
  * Whether a distance is close/far enough to shoot from at all is a separate range (inRange()), which can be
  * narrower than the table: the table's rows exist for interpolation, the range is where shots actually work.
- * To add a row, add it to RobotConstants.SHOT_TABLE_DISTANCES_INCHES / SHOT_TABLE_RPMS (keep distances ascending).
+ * To add a row, add it to SHOT_TABLE_DISTANCES_INCHES / SHOT_TABLE_RPMS (keep distances ascending).
  *
  * The curve is deliberately U-shaped: close in, the shot needs more speed to clear the front lip of the CELL.
  * Don't smooth it into a line.
@@ -25,6 +25,20 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
  *   73.5    0      270      2400    2500
  */
 public class ShotTable {
+    // =====================================================================================
+    // CONSTANTS (only this class uses these; shared ones stay in RobotConstants)
+    // =====================================================================================
+    // Distance (inches from the target) -> shooter motor RPM, linearly interpolated between rows (see ShotTable).
+    // Distances must be ascending. The curve is deliberately U-shaped: close in, the shot needs more speed to
+    // clear the front lip of the CELL. RPMs are as read from shooter telemetry (SHOOTER_ENCODER_TICKS_PER_REV).
+    public static final double[] SHOT_TABLE_DISTANCES_INCHES = {42.0, 45.0, 48.0, 52.0, 62.4};
+    public static final double[] SHOT_TABLE_RPMS = {2475.0, 2400.0, 2440.0, 2460.0, 2525.0};
+
+    // A position is only valid to shoot from within this distance range (inclusive). The 42 in table row exists
+    // for interpolation, but 42 in is the edge of what works, so the range starts at 43.
+    public static final double SHOT_MIN_DISTANCE_INCHES = 43.0;
+    public static final double SHOT_MAX_DISTANCE_INCHES = 62.4;
+
     private final double[] distancesInches; // ascending
     private final double[] rpms;            // rpms[i] is the shot speed at distancesInches[i]
     private final double minInRangeInches;
@@ -55,16 +69,16 @@ public class ShotTable {
     }
 
     /**
-     * Builds the table from the rows and range in RobotConstants.
+     * Builds the table from the tuned rows and range at the top of this class.
      *
      * @return the robot's shot table
      */
-    public static ShotTable fromRobotConstants() {
+    public static ShotTable fromTunedRows() {
         return new ShotTable(
-                RobotConstants.SHOT_TABLE_DISTANCES_INCHES,
-                RobotConstants.SHOT_TABLE_RPMS,
-                RobotConstants.SHOT_MIN_DISTANCE_INCHES,
-                RobotConstants.SHOT_MAX_DISTANCE_INCHES);
+                SHOT_TABLE_DISTANCES_INCHES,
+                SHOT_TABLE_RPMS,
+                SHOT_MIN_DISTANCE_INCHES,
+                SHOT_MAX_DISTANCE_INCHES);
     }
 
     /**

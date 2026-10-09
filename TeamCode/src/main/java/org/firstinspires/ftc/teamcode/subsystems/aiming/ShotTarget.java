@@ -7,7 +7,8 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
  * All coordinates are Pedro field coordinates (inches; heading 0 = +x, counterclockwise positive).
  *
  * Only one cell is measured: the BLUE hive's lower-right cell, as seen in the Pedro Pathing visualizer
- * (RobotConstants.MEASURED_CELL_*). Every shot measurement and the whole shot table were taken against that cell.
+ * (the MEASURED_CELL_* constants at the top of this class). Every shot measurement and the whole shot table were
+ * taken against that cell.
  * The other three cells are derived from it by the field's symmetry about the point
  * (RobotConstants.FIELD_SYMMETRY_CENTER_X_INCHES, RobotConstants.FIELD_SYMMETRY_CENTER_Y_INCHES), and the shot
  * table carries over to them unchanged because the distances are the same by symmetry.
@@ -17,11 +18,24 @@ import org.firstinspires.ftc.teamcode.RobotConstants;
  * the left edge looking toward +x, so for them "left" is the upper cell and "right" is the lower cell.
  */
 public final class ShotTarget {
+    // =====================================================================================
+    // CONSTANTS (only this class uses these; shared ones stay in RobotConstants)
+    // =====================================================================================
+    // THE MEASURED CELL: the BLUE hive's LOWER-RIGHT cell, as seen in the Pedro Pathing visualizer. Every shot
+    // measurement and the shot table below were taken against this one cell. The other three cells are derived from
+    // it by symmetry (see ShotTarget), so this is the only cell position stored.
+    // The point is the least-squares intersection of all measured shot headings. It was measured as (72.95, 47.56)
+    // in the old TeleOp frame, which is Pedro minus 8.5 in on x and y.
+    private static final double MEASURED_CELL_X_INCHES = 81.45;
+    private static final double MEASURED_CELL_Y_INCHES = 56.06;
+    // Direction from the measured cell to the spot straight in front of it: it's shot from below (-y), i.e. 270 deg
+    private static final double MEASURED_CELL_FRONT_DIRECTION_DEGREES = 270.0;
+
     /** Blue hive, lower cell: the measured cell everything else is derived from. */
     public static final ShotTarget BLUE_LOWER = new ShotTarget("Blue lower",
-            RobotConstants.MEASURED_CELL_X_INCHES,
-            RobotConstants.MEASURED_CELL_Y_INCHES,
-            RobotConstants.MEASURED_CELL_FRONT_DIRECTION_DEGREES);
+            MEASURED_CELL_X_INCHES,
+            MEASURED_CELL_Y_INCHES,
+            MEASURED_CELL_FRONT_DIRECTION_DEGREES);
 
     /** Blue hive, upper cell: the measured cell flipped over the field's horizontal center line. */
     public static final ShotTarget BLUE_UPPER = BLUE_LOWER.flippedOverHorizontalCenterLine("Blue upper");
