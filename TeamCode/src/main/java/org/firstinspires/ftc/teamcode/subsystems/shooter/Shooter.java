@@ -5,6 +5,8 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 
+import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit;
+
 import org.firstinspires.ftc.teamcode.RobotConstants;
 
 /**
@@ -75,6 +77,16 @@ public class Shooter {
      */
     public Shooter(HardwareMap hardwareMap) {
         shooterMotor = hardwareMap.get(DcMotorEx.class, SHOOTER_MOTOR_NAME);
+        applyVelocityControlSettings();
+    }
+
+    /**
+     * Sends the hub the run mode and velocity PIDF gains setVelocity() needs. Done at INIT and again at the start of
+     * every shot (see requestShooting()): the shooter is on Expansion Hub 2, and when that hub loses power mid-match
+     * it reboots with its default gains, which overshoot badly (10-09 logs). Re-sending them each shot means a power
+     * loss only spoils the shot in progress, not the rest of the match.
+     */
+    private void applyVelocityControlSettings() {
         // Lets the motor controller use the encoder to hold the speed passed to setVelocity()
         shooterMotor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         if (SHOOTER_USE_CUSTOM_VELOCITY_PIDF) {
@@ -185,6 +197,39 @@ public class Shooter {
     }
 
     /**
+     * Reads back the velocity PIDF gains the motor controller (the hub) is actually using for setVelocity(), to
+     * check whether the SHOOTER_VELOCITY_* gains set in the constructor really took. A hub read, so call it rarely
+     * (e.g. once at INIT), not every loop.
+     *
+     * @return the hub's RUN_USING_ENCODER PIDF coefficients
+     */
+    public PIDFCoefficients readHubVelocityPidf() {
+        return shooterMotor.getPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER);
+    }
+
+    /**
+     * The velocity PIDF gains this class asks the hub to use (whether or not the hub took them).
+     *
+     * @return the configured gains, or null if SHOOTER_USE_CUSTOM_VELOCITY_PIDF is off and the hub keeps its defaults
+     */
+    public PIDFCoefficients getConfiguredVelocityPidf() {
+        if (!SHOOTER_USE_CUSTOM_VELOCITY_PIDF) {
+            return null;
+        }
+        return new PIDFCoefficients(SHOOTER_VELOCITY_P, SHOOTER_VELOCITY_I, SHOOTER_VELOCITY_D, SHOOTER_VELOCITY_F);
+    }
+
+    /**
+     * The current the shooter motor is drawing, which shows how hard the controller is pushing (e.g. while
+     * recovering from a ball). A hub read, about a couple of milliseconds.
+     *
+     * @return the motor current, in amps
+     */
+    public double getMotorCurrentAmps() {
+        return shooterMotor.getCurrent(CurrentUnit.AMPS);
+    }
+
+    /**
      * The highest shooter speed seen since init, so the top speed can be read off telemetry
      * after a spin-up without having to catch it live.
      *
@@ -196,9 +241,14 @@ public class Shooter {
 
     /**
      * Requests the shooting state. Robot must check that this is allowed first;
-     * this method does not check the intake.
+     * this method does not check the intake. When a shot starts (idle -> shooting), the velocity gains are sent to
+     * the hub again, in case it lost power and forgot them (see applyVelocityControlSettings()). Safe to call every
+     * loop: they're only re-sent once per shot.
      */
     public void requestShooting() {
+        if (state != State.SHOOTING) {
+            applyVelocityControlSettings();
+        }
         state = State.SHOOTING;
     }
 

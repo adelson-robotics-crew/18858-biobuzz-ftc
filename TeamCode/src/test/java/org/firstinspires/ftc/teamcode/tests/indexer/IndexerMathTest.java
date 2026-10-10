@@ -58,16 +58,45 @@ public class IndexerMathTest {
      */
     @Test
     public void powerToRestIsBoundedAndCorrectsEitherWay() {
-        assertEquals(0.0, IndexerMath.powerToRest(IndexerMath.INDEXER_REST_TOLERANCE_DEG), EPSILON);
+        assertEquals(0.0, IndexerMath.powerToRest(IndexerMath.INDEXER_REST_TOLERANCE_DEG, 0.0), EPSILON);
         // Just outside the tolerance: the proportional power, but never less than the minimum
         double justOutsideDegrees = IndexerMath.INDEXER_REST_TOLERANCE_DEG + 0.5;
         double expectedNearMagnitude = Math.max(IndexerMath.INDEXER_REST_MIN_POWER,
                 IndexerMath.INDEXER_REST_KP * justOutsideDegrees);
-        assertEquals(expectedNearMagnitude, IndexerMath.powerToRest(justOutsideDegrees), EPSILON);
-        assertEquals(-expectedNearMagnitude, IndexerMath.powerToRest(-justOutsideDegrees), EPSILON);
+        assertEquals(expectedNearMagnitude, IndexerMath.powerToRest(justOutsideDegrees, 0.0), EPSILON);
+        assertEquals(-expectedNearMagnitude, IndexerMath.powerToRest(-justOutsideDegrees, 0.0), EPSILON);
         // The farthest it can be from rest (half the spacing): proportional, capped at the maximum
         double farMagnitude = Math.min(IndexerMath.INDEXER_REST_MAX_POWER, IndexerMath.INDEXER_REST_KP * 45.0);
-        assertEquals(-farMagnitude, IndexerMath.powerToRest(-45.0), EPSILON);
-        assertEquals(farMagnitude, IndexerMath.powerToRest(45.0), EPSILON);
+        assertEquals(-farMagnitude, IndexerMath.powerToRest(-45.0, 0.0), EPSILON);
+        assertEquals(farMagnitude, IndexerMath.powerToRest(45.0, 0.0), EPSILON);
+    }
+
+    /**
+     * The damping term brakes it while it turns toward rest (less power), pushes harder if it's being knocked away
+     * (more power), and doesn't stop it holding still inside the tolerance.
+     */
+    @Test
+    public void dampingBrakesMotionTowardRest() {
+        double errorDegrees = 20.0; // needs to turn the positive way
+        double stillPower = IndexerMath.powerToRest(errorDegrees, 0.0);
+        double turningTowardRest = IndexerMath.powerToRest(errorDegrees, 200.0);
+        double knockedAway = IndexerMath.powerToRest(errorDegrees, -200.0);
+        assertEquals(stillPower - IndexerMath.INDEXER_REST_KD * 200.0, turningTowardRest, EPSILON);
+        assertTrue(turningTowardRest < stillPower);
+        assertTrue(knockedAway > stillPower);
+        assertEquals(0.0, IndexerMath.powerToRest(1.0, 500.0), EPSILON); // inside the tolerance: no power at all
+        // Never past the maximum, however fast it's turning
+        assertTrue(Math.abs(IndexerMath.powerToRest(45.0, -1.0e6)) <= IndexerMath.INDEXER_REST_MAX_POWER);
+    }
+
+    /**
+     * The angle change takes the short way round, including across the encoder's 360 -> 0 wrap.
+     */
+    @Test
+    public void angleChangeTakesTheShortWayAcrossTheWrap() {
+        assertEquals(10.0, IndexerMath.angleChangeDegrees(100.0, 110.0), EPSILON);
+        assertEquals(-10.0, IndexerMath.angleChangeDegrees(110.0, 100.0), EPSILON);
+        assertEquals(10.0, IndexerMath.angleChangeDegrees(355.0, 5.0), EPSILON);
+        assertEquals(-10.0, IndexerMath.angleChangeDegrees(5.0, 355.0), EPSILON);
     }
 }

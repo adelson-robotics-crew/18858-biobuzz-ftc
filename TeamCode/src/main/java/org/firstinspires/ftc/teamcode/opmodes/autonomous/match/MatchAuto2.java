@@ -15,7 +15,7 @@ import com.pedropathing.math.Pose;
  * Each drive leg finishes only once the robot is at its target pose (see Drivetrain's followPathCommand()).
  * Not listed on the Driver Station itself: RedMatchAuto2 and BlueMatchAuto2 choose the alliance.
  */
-public abstract class MatchAuto2 extends MatchAuto {
+public abstract class MatchAuto2 extends MatchAutoBase {
     // =====================================================================================
     // CONSTANTS (only this class uses these; shared ones stay in RobotConstants)
     // =====================================================================================

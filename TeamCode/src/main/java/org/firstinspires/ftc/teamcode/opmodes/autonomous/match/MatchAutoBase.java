@@ -31,7 +31,7 @@ import org.firstinspires.ftc.teamcode.Alliance;
  * (see forAlliance()). Not listed on the Driver Station itself: a thin Red/Blue wrapper per routine chooses the
  * alliance. Run Match TeleOp right after; it picks up the auto's final pose and alliance.
  */
-public abstract class MatchAuto extends OpMode {
+public abstract class MatchAutoBase extends OpMode {
     // =====================================================================================
     // CONSTANTS (only this class uses these; shared ones stay in RobotConstants)
     // =====================================================================================
@@ -189,7 +189,7 @@ public abstract class MatchAuto extends OpMode {
                 "velocityX", "velocityY", "turnRateDegPerSec",
                 "followerMode", "followerBusy", "pathProgress",
                 "pathPointX", "pathPointY", "pathPointHeadingDeg",
-                "shooterRpm", "shooterTargetRpm", "shooterAtSpeed",
+                "shooterRpm", "shooterTargetRpm", "shooterAtSpeed", "batteryVolts",
                 "indexerState", "indexerAngleDeg", "indexerOffRestDeg",
                 "pedroDebug");
     }
@@ -295,6 +295,7 @@ public abstract class MatchAuto extends OpMode {
                 closestPathPose == null ? "" : closestPathPose.y(),
                 closestPathPose == null ? "" : Math.toDegrees(closestPathPose.heading()),
                 robot.shooter.getShooterRpm(), robot.shooter.getTargetRpm(), robot.shooter.isAtSpeed(),
+                robot.getBatteryVoltage(),
                 robot.indexer.getState().name(), robot.indexer.getAngleDegrees(),
                 robot.indexer.getErrorToRestDegrees(),
                 robot.drivetrain.getFollowerDebugText());

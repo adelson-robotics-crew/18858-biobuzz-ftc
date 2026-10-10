@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode;
 import com.pedropathing.math.Pose;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareMap;
+import com.qualcomm.robotcore.hardware.VoltageSensor;
 
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolution;
 import org.firstinspires.ftc.teamcode.subsystems.aiming.ShotSolver;
@@ -92,6 +93,10 @@ public class Robot {
     public final Shooter shooter;
     public final Indexer indexer;
 
+    // The battery voltage as the hub measures it. Not part of any subsystem: it's read for logging, since the
+    // shooter's behavior has been seen to change as the battery runs down
+    private final VoltageSensor batteryVoltageSensor;
+
     // Whether the indexer may feed once the shooter's wheel is at speed (see update()). Set every loop by whatever
     // is shooting: while aiming, only once the position is valid and the robot is aimed; otherwise true
     private boolean feedAllowed = true;
@@ -138,6 +143,18 @@ public class Robot {
         intake = new Intake(hardwareMap);
         shooter = new Shooter(hardwareMap);
         indexer = new Indexer(hardwareMap);
+        // The hub's voltage sensor; there's one per hub, and any of them reads the same battery
+        batteryVoltageSensor = hardwareMap.voltageSensor.iterator().next();
+    }
+
+    /**
+     * The battery voltage right now, as the hub measures it. A hub read (a couple of milliseconds), so read it once
+     * per loop at most.
+     *
+     * @return the battery voltage, in volts
+     */
+    public double getBatteryVoltage() {
+        return batteryVoltageSensor.getVoltage();
     }
 
     /**

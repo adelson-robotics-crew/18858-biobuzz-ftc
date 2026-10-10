@@ -32,7 +32,9 @@ public class ShotTable {
     // Distances must be ascending. The curve is deliberately U-shaped: close in, the shot needs more speed to
     // clear the front lip of the CELL. RPMs are as read from shooter telemetry (SHOOTER_ENCODER_TICKS_PER_REV).
     public static final double[] SHOT_TABLE_DISTANCES_INCHES = {42.0, 45.0, 48.0, 52.0, 62.4};
-    public static final double[] SHOT_TABLE_RPMS = {2475.0, 2400.0, 2440.0, 2460.0, 2525.0};
+    // Every row lowered 25 RPM on 10-09 (was 2475, 2400, 2440, 2460, 2525): with the wheel verified at the table
+    // speed, Match Auto 1's shots from its start spot (~48 in) still landed high in the cell or missed over.
+    public static final double[] SHOT_TABLE_RPMS = {2450.0, 2375.0, 2415.0, 2435.0, 2500.0};
 
     // A position is only valid to shoot from within this distance range (inclusive). The 42 in table row exists
     // for interpolation, but 42 in is the edge of what works, so the range starts at 43.

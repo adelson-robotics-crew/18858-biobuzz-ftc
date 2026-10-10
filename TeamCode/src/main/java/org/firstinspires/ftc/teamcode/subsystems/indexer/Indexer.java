@@ -71,6 +71,10 @@ public class Indexer {
     // When the current correction window started, and how long it lasts; see startCorrecting()
     private final ElapsedTime correctionTimer = new ElapsedTime();
     private double correctionSeconds = 0.0;
+    // The angle and time of the previous correcting loop, for the damping term's turn rate; NaN on the first loop
+    // of a window, when there's no previous reading yet
+    private double previousAngleDegrees = Double.NaN;
+    private final ElapsedTime timeSincePreviousAngle = new ElapsedTime();
 
     /**
      * Gets the indexer hardware from the hardware map. On the first INIT since the app started, records the current
@@ -104,7 +108,17 @@ public class Indexer {
                     state = State.HOLDING;
                     indexerServo.setPower(0.0);
                 } else {
-                    indexerServo.setPower(IndexerMath.powerToRest(getErrorToRestDegrees()));
+                    double angleDegrees = getAngleDegrees();
+                    double turnRateDegreesPerSecond = 0.0;
+                    double secondsSincePrevious = timeSincePreviousAngle.seconds();
+                    if (!Double.isNaN(previousAngleDegrees) && secondsSincePrevious > 0.0) {
+                        turnRateDegreesPerSecond = IndexerMath.angleChangeDegrees(previousAngleDegrees, angleDegrees)
+                                / secondsSincePrevious;
+                    }
+                    previousAngleDegrees = angleDegrees;
+                    timeSincePreviousAngle.reset();
+                    double errorDegrees = IndexerMath.errorToNearestRestDegrees(angleDegrees, INDEXER_REST_SPACING_DEG);
+                    indexerServo.setPower(IndexerMath.powerToRest(errorDegrees, turnRateDegreesPerSecond));
                 }
                 break;
         }
@@ -151,6 +165,7 @@ public class Indexer {
             state = State.CORRECTING;
             correctionTimer.reset();
             correctionSeconds = seconds;
+            previousAngleDegrees = Double.NaN; // no turn rate until the window's second loop
         }
     }
 

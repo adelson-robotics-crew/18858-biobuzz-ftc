@@ -2,7 +2,9 @@ package org.firstinspires.ftc.teamcode.opmodes.teleop;
 
 import com.pedropathing.math.Pose;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
+import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import com.qualcomm.robotcore.util.ElapsedTime;
+import com.qualcomm.robotcore.util.RobotLog;
 
 import org.firstinspires.ftc.teamcode.Robot;
 import org.firstinspires.ftc.teamcode.RobotConstants;
@@ -23,7 +25,26 @@ import org.firstinspires.ftc.teamcode.subsystems.drivetrain.Drivetrain;
  * Every loop is written to a CSV log on the Robot Controller (see CsvLog) so a run can be analyzed afterward.
  */
 public abstract class MatchTeleOp extends OpMode {
+    // =====================================================================================
+    // CONSTANTS (only this class uses these; shared ones stay in RobotConstants)
+    // =====================================================================================
+    // Odometry sanity check. The robot's center can't get closer to a wall than about this (against a wall it reads
+    // about 8.8 in from the bottom wall and 133.4 from the top, see the Match Auto start poses), so a pose closer
+    // than that, minus ODOMETRY_OFF_SLACK_INCHES, means the odometry is wrong (e.g. pods skidded when the robot hit
+    // a wall: one 10-09 run read x = -26). The aim trigger trusts the pose, so the driver is told to shoot manually.
+    private static final double ROBOT_CENTER_MIN_DISTANCE_FROM_WALL_INCHES = 8.0;
+    private static final double ODOMETRY_OFF_SLACK_INCHES = 3.0;
+    // The pose has to be impossible for this many loops in a row (about 0.15 s) before the warning comes on, so a
+    // one-off bad read doesn't trigger it: the Pinpoint once returned (0, 0, 0) for 2 loops mid-drive, then was fine
+    private static final int ODOMETRY_OFF_MIN_LOOPS = 5;
+
     private Robot robot;
+
+    // Set once the pose has been somewhere the robot can't physically be, and kept for the rest of the run: an
+    // odometry error stays even after the numbers drift back inside the field
+    private boolean odometryOff = false;
+    // How many loops in a row the pose has been somewhere the robot can't be
+    private int unreachablePoseLoops = 0;
 
     // The pose the robot was told it starts at in init(), or null if none was set; init_loop() checks the odometry
     // still reads it
@@ -33,6 +54,14 @@ public abstract class MatchTeleOp extends OpMode {
     private String startPoseSourceText;
     private String allianceText;
     private String warningText = null; // null when there's nothing to warn about
+
+    // Shooter diagnostics: the velocity PIDF gains the hub is really using (read back at INIT and START) next to the
+    // ones Shooter asks for, so a mismatch shows on telemetry; and the shooter motor's current this loop, for the log
+    private String shooterHubPidfText = "not read yet";
+    private String shooterConfiguredPidfText = "not read yet";
+    private double shooterAmpsThisLoop = 0.0;
+    // The battery voltage this loop, for telemetry and the log
+    private double batteryVoltsThisLoop = 0.0;
 
     // One row per loop, written to /sdcard/logs/ on the Robot Controller
     private CsvLog teleOpLog;
@@ -145,6 +174,7 @@ public abstract class MatchTeleOp extends OpMode {
             robot.drivetrain.setPose(startPose);
         }
         robot.update(); // apply the start pose before the OpMode starts
+        readShooterPidf();
 
         teleOpLog = new CsvLog(getClass().getSimpleName(),
                 "timeSec", "loopMs", "alliance",
@@ -152,8 +182,9 @@ public abstract class MatchTeleOp extends OpMode {
                 "x", "y", "headingDeg", "turnRateDegPerSec",
                 "cell", "shotHeadingDeg", "headingErrorDeg", "aimTurnPower",
                 "shotValidity", "shotDistanceIn", "angleOffCenterDeg",
-                "shooterTargetRpm", "shooterRpm", "shooterAtSpeed", "readyToShoot", "robotState",
-                "indexerState", "indexerAngleDeg", "indexerOffRestDeg", "indexerEncoderVolts");
+                "shooterTargetRpm", "shooterRpm", "shooterAtSpeed", "shooterAmps", "batteryVolts",
+                "readyToShoot", "robotState",
+                "indexerState", "indexerAngleDeg", "indexerOffRestDeg", "indexerEncoderVolts", "odometryOff");
 
         addStartInfoToTelemetry();
         telemetry.update();
@@ -193,6 +224,7 @@ public abstract class MatchTeleOp extends OpMode {
         if (startPose != null) {
             robot.drivetrain.setPose(startPose);
         }
+        readShooterPidf(); // again, in case anything changed the gains since INIT
         timeSinceStart.reset();
         previousLoopSeconds = 0.0;
     }
@@ -207,6 +239,14 @@ public abstract class MatchTeleOp extends OpMode {
         robot.applyDriverControls(gamepad1);
         robot.update();
 
+        Pose robotPose = robot.drivetrain.getPose(); // position from the Pinpoint; inches for x/y, radians for heading
+        unreachablePoseLoops = isPoseReachable(robotPose) ? 0 : unreachablePoseLoops + 1;
+        if (unreachablePoseLoops >= ODOMETRY_OFF_MIN_LOOPS) {
+            odometryOff = true;
+        }
+        if (odometryOff) {
+            telemetry.addData("!!!", "ODOMETRY OFF - USE MANUAL SHOOTING");
+        }
         if (warningText != null) {
             telemetry.addData("WARNING", warningText);
         }
@@ -234,9 +274,14 @@ public abstract class MatchTeleOp extends OpMode {
 
         telemetry.addData("Robot State", robot.getSuperState().label);
         telemetry.addData("Alliance", allianceText);
-        Pose robotPose = robot.drivetrain.getPose(); // position from the Pinpoint; inches for x/y, radians for heading
         telemetry.addData("Robot (x, y, heading)", "%.1f, %.1f, %.0f",
                 robotPose.x(), robotPose.y(), Math.toDegrees(robotPose.heading())); // heading radians -> degrees
+        shooterAmpsThisLoop = robot.shooter.getMotorCurrentAmps();
+        batteryVoltsThisLoop = robot.getBatteryVoltage();
+        telemetry.addData("Shooter Current (A)", "%.2f", shooterAmpsThisLoop);
+        telemetry.addData("Battery (V)", "%.2f", batteryVoltsThisLoop);
+        telemetry.addData("Shooter PIDF on hub", shooterHubPidfText);
+        telemetry.addData("Shooter PIDF asked for", shooterConfiguredPidfText);
         if (teleOpLog.getErrorMessage() != null) {
             telemetry.addData("Log error", teleOpLog.getErrorMessage());
         }
@@ -292,9 +337,50 @@ public abstract class MatchTeleOp extends OpMode {
                 shotSolution == null ? "" : shotSolution.distanceInches,
                 shotSolution == null ? "" : shotSolution.angleOffCenterDegrees,
                 robot.shooter.getTargetRpm(), robot.shooter.getShooterRpm(), robot.shooter.isAtSpeed(),
+                shooterAmpsThisLoop, batteryVoltsThisLoop,
                 robot.isReadyToShoot(), robot.getSuperState().label,
                 robot.indexer.getState().name(), robot.indexer.getAngleDegrees(),
-                robot.indexer.getErrorToRestDegrees(), robot.indexer.getEncoderVoltage());
+                robot.indexer.getErrorToRestDegrees(), robot.indexer.getEncoderVoltage(), odometryOff);
+    }
+
+    /**
+     * Whether the robot could physically be at this pose: its center at least
+     * ROBOT_CENTER_MIN_DISTANCE_FROM_WALL_INCHES (less the slack) from every wall. The field is square, twice the symmetry center across. A TeleOp in shifted
+     * coordinates (coordinateOffsetInches()) is shifted back to Pedro first.
+     *
+     * @param robotPose the pose the odometry reports, in this TeleOp's coordinates
+     * @return true if the pose is somewhere the robot can be; false means the odometry is off
+     */
+    private boolean isPoseReachable(Pose robotPose) {
+        double fieldSizeInches = 2.0 * RobotConstants.FIELD_SYMMETRY_CENTER_X_INCHES;
+        double nearestCenterInches = ROBOT_CENTER_MIN_DISTANCE_FROM_WALL_INCHES - ODOMETRY_OFF_SLACK_INCHES;
+        double pedroX = robotPose.x() + coordinateOffsetInches();
+        double pedroY = robotPose.y() + coordinateOffsetInches();
+        return pedroX >= nearestCenterInches && pedroX <= fieldSizeInches - nearestCenterInches
+                && pedroY >= nearestCenterInches && pedroY <= fieldSizeInches - nearestCenterInches;
+    }
+
+    /**
+     * Reads back the shooter's velocity PIDF gains from the hub and the ones Shooter asks for, for telemetry and the
+     * Robot Controller log. A hub read, so only done at INIT and START.
+     */
+    private void readShooterPidf() {
+        shooterHubPidfText = formatPidf(robot.shooter.readHubVelocityPidf());
+        PIDFCoefficients configured = robot.shooter.getConfiguredVelocityPidf();
+        shooterConfiguredPidfText = configured == null ? "none (hub defaults)" : formatPidf(configured);
+        RobotLog.ii("MatchTeleOp", "Shooter velocity PIDF on hub: %s, asked for: %s",
+                shooterHubPidfText, shooterConfiguredPidfText);
+    }
+
+    /**
+     * Formats PIDF gains for telemetry.
+     *
+     * @param gains the gains to show
+     * @return e.g. "P 300.000 I 0.000 D 0.000 F 13.000 (LegacyPID)"
+     */
+    private static String formatPidf(PIDFCoefficients gains) {
+        return String.format("P %.3f I %.3f D %.3f F %.3f (%s)",
+                gains.p, gains.i, gains.d, gains.f, gains.algorithm);
     }
 
     /**
@@ -307,5 +393,7 @@ public abstract class MatchTeleOp extends OpMode {
         telemetry.addData("Alliance", allianceText);
         telemetry.addData("Driver Side", robot.isDriverOnBlueSide() ? "Blue" : "Red");
         telemetry.addData("Start Pose", startPoseSourceText);
+        telemetry.addData("Shooter PIDF on hub", shooterHubPidfText);
+        telemetry.addData("Shooter PIDF asked for", shooterConfiguredPidfText);
     }
 }
